@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16
+
+    container_name: local-data-platform-postgres
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: dataeng
+      POSTGRES_PASSWORD: dataeng
+      POSTGRES_DB: ecommerce
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dataeng -d ecommerce"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+    mem_limit: 2g
+
+
+volumes:
+  postgres_data:
