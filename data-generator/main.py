@@ -10,22 +10,28 @@ from generate_order_items import load_ids, generate_order_items
 from generate_payments import load_orders, generate_payments
 def main():
     with psycopg.connect(**DB_CONFIG) as conn:
-        # generate_products(conn)
-        # generate_customers(conn)
+        # product
+        generate_products(conn)
+        
+        # customer
+        generate_customers(conn)
 
-        # customer_ids = load_customer_ids(conn)
-        # print(f"Loaded {len(customer_ids):,} customers)
-        # generate_orders(conn, customer_ids)
+        # order (1 customer - N order)
+        customer_ids = load_customer_ids(conn)
+        print(f"Loaded {len(customer_ids):,} customers)
+        generate_orders(conn, customer_ids)
 
-        # order_ids, product_ids = load_ids(conn)
-        # print(f"Loaded {len(order_ids):,} orders")
-        # print(f"Loaded {len(product_ids):,} products")
-        # generate_order_items(
-        #     conn,
-        #     order_ids,
-        #     product_ids,
-        # )
+        # order item (1 order - N item)
+        order_ids, product_ids = load_ids(conn)
+        print(f"Loaded {len(order_ids):,} orders")
+        print(f"Loaded {len(product_ids):,} products")
+        generate_order_items(
+            conn,
+            order_ids,
+            product_ids,
+        )
 
+        # payment (1 order - N payment)
         orders = load_orders(conn)
         print(
             f"Loaded {len(orders):,} orders"
