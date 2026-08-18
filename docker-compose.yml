@@ -11,6 +11,7 @@ x-airflow-common: &airflow-common
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: ${AIRFLOW_DAGS_ARE_PAUSED_AT_CREATION}
       AIRFLOW__CORE__DEFAULT_TIMEZONE: ${AIRFLOW_TIMEZONE}
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
+      AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: ${AIRFLOW_DAG_PROCESSOR_REFRESH_INTERVAL}
       AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/config/simple_auth_manager_passwords.json
       # --------------------------------------------------------
       # Airflow metadata database
@@ -29,6 +30,7 @@ x-airflow-common: &airflow-common
       # --------------------------------------------------------
       AIRFLOW__API__BASE_URL: http://airflow-api-server:8080
       AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_API_AUTH_JWT_SECRET}
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs

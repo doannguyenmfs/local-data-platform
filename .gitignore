@@ -2,7 +2,7 @@
 **/__pycache__/
 .*py[cod]
 .DS_Store
-
+**/logs/
 .env
 airflow/config/simple_auth_manager_passwords.json
 .venv.*
