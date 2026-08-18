@@ -29,9 +29,6 @@ x-airflow-common: &airflow-common
       # --------------------------------------------------------
       AIRFLOW__API__BASE_URL: http://airflow-api-server:8080
       AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
-      # Bootstrap UI administrator for Airflow's SimpleAuthManager
-      AIRFLOW_ADMIN_USERNAME: ${AIRFLOW_ADMIN_USERNAME}
-      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -116,10 +113,6 @@ services:
     command:
       - |
         set -e
-        if [ ! -s /opt/airflow/config/simple_auth_manager_passwords.json ]; then
-          printf '{"%s":"%s"}\n' "$${AIRFLOW_ADMIN_USERNAME}" "$${AIRFLOW_ADMIN_PASSWORD}" \
-            > /opt/airflow/config/simple_auth_manager_passwords.json
-        fi
         airflow db migrate
         echo "airflow db migration completed!"
     restart: "no"
