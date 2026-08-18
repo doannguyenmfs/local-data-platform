@@ -11,7 +11,6 @@ x-airflow-common: &airflow-common
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: ${AIRFLOW_DAGS_ARE_PAUSED_AT_CREATION}
       AIRFLOW__CORE__DEFAULT_TIMEZONE: ${AIRFLOW_TIMEZONE}
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
-      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${AIRFLOW_ADMIN_USERNAME:-admin}:admin
       AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/config/simple_auth_manager_passwords.json
       # --------------------------------------------------------
       # Airflow metadata database
@@ -31,8 +30,8 @@ x-airflow-common: &airflow-common
       AIRFLOW__API__BASE_URL: http://airflow-api-server:8080
       AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
       # Bootstrap UI administrator for Airflow's SimpleAuthManager
-      AIRFLOW_ADMIN_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-admin}
-      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-airflow}
+      AIRFLOW_ADMIN_USERNAME: ${AIRFLOW_ADMIN_USERNAME}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
@@ -65,7 +64,7 @@ services:
     ports:
       - "${ECOMMERCE_POSTGRES_HOST_PORT}:${ECOMMERCE_POSTGRES_PORT}"
     volumes:
-      - ecommerce-postgres-data:/var/opt/postgresql/data
+      - ecommerce-postgres-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
     # container memory limit
     # should remove limit when the data become very large
