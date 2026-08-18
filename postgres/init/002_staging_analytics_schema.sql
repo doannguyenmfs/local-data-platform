@@ -3,6 +3,9 @@ DROP SCHEMA IF EXISTS analytics CASCADE;
 CREATE SCHEMA IF NOT EXISTS staging;
 CREATE SCHEMA IF NOT EXISTS analytics;
 
+-- ==============
+-- STAGING DATA
+-- ==============
 CREATE TABLE IF NOT EXISTS staging.customers (
     customer_id UUID PRIMARY KEY,
     first_name TEXT,
@@ -44,6 +47,9 @@ CREATE TABLE IF NOT EXISTS staging.payments (
     paid_at TIMESTAMP
 );
 
+-- ==============
+-- ANALYTICS DATA
+-- ==============
 CREATE TABLE IF NOT EXISTS analytics.dim_customer (
     customer_id UUID PRIMARY KEY,
     first_name TEXT,

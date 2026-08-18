@@ -17,11 +17,11 @@ with DAG(
         rows = hook.get_records(
             """
                 SELECT
-                    ordered_at::date AS ordered_at,
+                    order_date::date AS order_date,
                     COUNT(*) AS order_count
                 FROM orders
-                GROUP BY ordered_at::date
-                ORDER BY ordered_at::date
+                GROUP BY order_date::date
+                ORDER BY order_date::date
                 LIMIT 10
             """
         )

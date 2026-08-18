@@ -24,7 +24,7 @@ def load_orders(conn):
             SELECT
                 order_id,
                 total_amount,
-                ordered_at
+                order_date
             FROM orders;
             """
         )
@@ -59,7 +59,7 @@ def generate_payments(conn, orders):
             ) as copy:
 
                 for i in range(current_batch_size):
-                    order_id, order_amount, ordered_at = orders[
+                    order_id, order_amount, order_date = orders[
                         processed_orders + i
                     ]
 
@@ -110,7 +110,7 @@ def generate_payments(conn, orders):
                             )
 
                             paid_at = (
-                                ordered_at
+                                order_date
                                 + timedelta(
                                     minutes=random.randint(1, 60)
                                 )

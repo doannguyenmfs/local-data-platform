@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS orders(
     customer_id UUID NOT NULL,
     status VARCHAR(100) NOT NULL DEFAULT 'pending',
     total_amount NUMERIC(14, 2) NOT NULL DEFAULT 0,
-    ordered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    order_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT orders_customer_fk
@@ -108,8 +108,8 @@ CREATE TABLE IF NOT EXISTS payments(
 -- 7. INDEX
 CREATE INDEX idx_orders_customer_id
     ON orders(customer_id);
-CREATE INDEX idx_orders_ordered_at
-    ON orders(ordered_at);
+CREATE INDEX idx_orders_order_date
+    ON orders(order_date);
 CREATE INDEX idx_orders_status
     ON orders(status);
 CREATE INDEX idx_order_items_order_id

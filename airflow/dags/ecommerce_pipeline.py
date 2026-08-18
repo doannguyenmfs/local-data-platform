@@ -14,7 +14,7 @@ POSTGRES_CONN_ID="ecommerce_postgres"
 )
 
 def ecommerce_pipeline():
-    @task
+    @task(retries=2)
     def extract_customers():
         hook = PostgresHook(
             postgres_conn_id=POSTGRES_CONN_ID
@@ -32,7 +32,7 @@ def ecommerce_pipeline():
             FROM public.customers;
         """)
 
-    @task
+    @task(retries=2)
     def extract_products():
         hook = PostgresHook(
             postgres_conn_id=POSTGRES_CONN_ID
@@ -50,7 +50,7 @@ def ecommerce_pipeline():
             FROM public.products;
         """)
 
-    @task
+    @task(retries=2)
     def extract_orders():
         hook = PostgresHook(
             postgres_conn_id=POSTGRES_CONN_ID
@@ -62,13 +62,13 @@ def ecommerce_pipeline():
             SELECT
                 order_id,
                 customer_id,
-                ordered_at,
+                order_date,
                 status,
                 total_amount
             FROM public.orders;
         """)
     
-    @task
+    @task(retries=2)
     def extract_order_items():
         hook = PostgresHook(
             postgres_conn_id=POSTGRES_CONN_ID
@@ -86,7 +86,7 @@ def ecommerce_pipeline():
             FROM public.order_items;
         """)
     
-    @task
+    @task(retries=2)
     def extract_payments():
         hook = PostgresHook(
             postgres_conn_id=POSTGRES_CONN_ID
@@ -105,8 +105,8 @@ def ecommerce_pipeline():
             FROM public.payments;
         """)
 
-    @task
-    def validate():
+    @task(retries=2)
+    def validate_record_count():
         hook = PostgresHook(
             postgres_conn_id=POSTGRES_CONN_ID
         )
@@ -143,11 +143,9 @@ def ecommerce_pipeline():
 
     @task(retries=2)
     def validate_relationships():
-
         hook = PostgresHook(
             postgres_conn_id=POSTGRES_CONN_ID
         )
-
         checks = {
             "orders_without_customer": """
                 SELECT COUNT(*)
@@ -204,27 +202,181 @@ def ecommerce_pipeline():
                 )
             )
 
-    @task
-    def transform():
-        pass
+    @task(retries=2)
+    def transform_fact_sales():
+        hook = PostgresHook(
+            postgres_conn_id=POSTGRES_CONN_ID
+        )
+        hook.run(
+            """
+            INSERT INTO analytics.fact_sales (
+                order_id,
+                order_item_id,
+                customer_id,
+                product_id,
+                order_date,
+                quantity,
+                unit_price,
+                sales_amount,
+                payment_status
+            )
+            SELECT
+                o.order_id,
+                oi.order_item_id,
+                o.customer_id,
+                oi.product_id,
+                o.order_date,
+                oi.quantity,
+                oi.unit_price,
 
-    @task
-    def load():
-        pass
+                oi.quantity * oi.unit_price
+                    AS sales_amount,
 
+                COALESCE(
+                    p.payment_status,
+                    'unpaid'
+                ) AS payment_status
 
+            FROM staging.orders o
+
+            JOIN staging.order_items oi
+                ON oi.order_id = o.order_id
+
+            JOIN staging.customers c
+                ON c.customer_id = o.customer_id
+
+            JOIN staging.products pr
+                ON pr.product_id = oi.product_id
+
+            LEFT JOIN (
+                SELECT
+                    order_id,
+
+                    CASE
+                        WHEN BOOL_AND(
+                            payment_status = 'completed'
+                        )
+                            THEN 'paid'
+
+                        WHEN BOOL_OR(
+                            payment_status = 'completed'
+                        )
+                            THEN 'partially_paid'
+
+                        ELSE 'unpaid'
+                    END AS payment_status
+
+                FROM staging.payments
+
+                GROUP BY order_id
+            ) p
+                ON p.order_id = o.order_id
+
+            ON CONFLICT (
+                order_id,
+                order_item_id
+            )
+            DO UPDATE SET
+                customer_id = EXCLUDED.customer_id,
+                product_id = EXCLUDED.product_id,
+                order_date = EXCLUDED.order_date,
+                quantity = EXCLUDED.quantity,
+                unit_price = EXCLUDED.unit_price,
+                sales_amount = EXCLUDED.sales_amount,
+                payment_status = EXCLUDED.payment_status;
+            """
+        )
+
+    @task(retries=2)
+    def load_dim_product():
+        hook = PostgresHook(
+            postgres_conn_id=POSTGRES_CONN_ID
+        )
+        hook.run(
+            """
+            INSERT INTO analytics.dim_product (
+                product_id,
+                name,
+                category,
+                price,
+                created_at
+            )
+            SELECT
+                product_id,
+                name,
+                category,
+                price,
+                created_at
+            FROM staging.products
+
+            ON CONFLICT (product_id)
+            DO UPDATE SET
+                name = EXCLUDED.name,
+                category = EXCLUDED.category,
+                price = EXCLUDED.price,
+                created_at = EXCLUDED.created_at;
+            """
+        )
+
+    @task(retries=2)
+    def load_daily_sales():
+        hook = PostgresHook(
+            postgres_conn_id=POSTGRES_CONN_ID
+        )
+        hook.run(
+            """
+            INSERT INTO analytics.daily_sales (
+                sales_date,
+                total_orders,
+                total_items,
+                total_sales,
+                paid_sales
+            )
+            SELECT
+                order_date::date AS sales_date,
+
+                COUNT(DISTINCT order_id)
+                    AS total_orders,
+
+                SUM(quantity)
+                    AS total_items,
+
+                SUM(sales_amount)
+                    AS total_sales,
+
+                SUM(
+                    CASE
+                        WHEN payment_status = 'paid'
+                            THEN sales_amount
+                        ELSE 0
+                    END
+                ) AS paid_sales
+
+            FROM analytics.fact_sales
+
+            GROUP BY order_date::date
+
+            ON CONFLICT (sales_date)
+            DO UPDATE SET
+                total_orders = EXCLUDED.total_orders,
+                total_items = EXCLUDED.total_items,
+                total_sales = EXCLUDED.total_sales,
+                paid_sales = EXCLUDED.paid_sales;
+            """
+        )
+        
     customers = extract_customers()
     products = extract_products()
     orders = extract_orders()
     order_items = extract_order_items()
     payments = extract_payments()
 
-    validated = validate()
+    validated_record_count = validate_record_count()
     validated_relationships = validate_relationships()
 
-    transformed = transform()
-
-    loaded = load()
+    fact_sale = transform_fact_sales()
+    dim_product = load_dim_product()
+    daily_sales = load_daily_sales()
 
     [
         customers,
@@ -232,6 +384,7 @@ def ecommerce_pipeline():
         orders,
         order_items,
         payments,
-    ] >> validated >> validated_relationships >> transformed >> loaded
+    ] >> validated_record_count >> validated_relationships >> [fact_sale, dim_product]
+    fact_sale >> daily_sales
 
 ecommerce_pipeline()

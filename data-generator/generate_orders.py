@@ -32,7 +32,7 @@ def generate_orders(conn, customer_ids):
             with cur.copy("""
                 COPY orders (
                     customer_id,
-                    ordered_at,
+                    order_date,
                     status,
                     total_amount
                 )
