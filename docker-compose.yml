@@ -1,26 +1,203 @@
+x-airflow-common: &airflow-common
+    image: ${AIRFLOW_IMAGE}
+    user: "${AIRFLOW_UID}:0"
+    environment:
+      # --------------------------------------------------------
+      # Core
+      # --------------------------------------------------------
+      AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__CORE__LOAD_EXAMPLES: ${AIRFLOW_LOAD_EXAMPLES}
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: ${AIRFLOW_DAGS_ARE_PAUSED_AT_CREATION}
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: ${AIRFLOW_TIMEZONE}
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${AIRFLOW_ADMIN_USERNAME:-admin}:admin
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/config/simple_auth_manager_passwords.json
+      # --------------------------------------------------------
+      # Airflow metadata database
+      # --------------------------------------------------------
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
+        postgresql+psycopg2://${AIRFLOW_POSTGRES_USER}:${AIRFLOW_POSTGRES_PASSWORD}@airflow-postgres:${AIRFLOW_POSTGRES_PORT}/${AIRFLOW_POSTGRES_DB}
+      # --------------------------------------------------------
+      # Celery
+      # --------------------------------------------------------
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:${REDIS_PORT}/0
+      AIRFLOW__CELERY__RESULT_BACKEND: >-
+        db+postgresql://${AIRFLOW_POSTGRES_USER}:${AIRFLOW_POSTGRES_PASSWORD}@airflow-postgres:${AIRFLOW_POSTGRES_PORT}/${AIRFLOW_POSTGRES_DB}
+      AIRFLOW__CELERY__WORKER_CONCURRENCY: ${AIRFLOW_CELERY_WORKER_CONCURRENCY}
+      # --------------------------------------------------------
+      # API
+      # --------------------------------------------------------
+      AIRFLOW__API__BASE_URL: http://airflow-api-server:8080
+      AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
+      # Bootstrap UI administrator for Airflow's SimpleAuthManager
+      AIRFLOW_ADMIN_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-admin}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-airflow}
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./airflow/config:/opt/airflow/config
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 services:
+  # =============
+  # SOURCE DATA BASE
+  # =============
   postgres:
     image: postgres:16
     container_name: local-data-platform-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: dataeng
-      POSTGRES_PASSWORD: dataeng
-      POSTGRES_DB: ecommerce
+      POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dataeng -d ecommerce"]
+      test: ["CMD-SHELL", "pg_isready -U ${ECOMMERCE_POSTGRES_USER} -d ${ECOMMERCE_POSTGRES_DB}"]
       interval: 10s
       timeout: 10s
       retries: 5
       start_period: 10s
     ports:
-      - "5432:5432"
+      - "${ECOMMERCE_POSTGRES_HOST_PORT}:${ECOMMERCE_POSTGRES_PORT}"
     volumes:
-      - postgres-data:/var/opt/postgresql/data
+      - ecommerce-postgres-data:/var/opt/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
     # container memory limit
     # should remove limit when the data become very large
     mem_limit: 2g
 
+  # =============
+  # AIRFLOW METADATA DATABASE
+  # =============
+  airflow-postgres:
+    image: postgres:16
+    container_name: local-data-platform-airflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${AIRFLOW_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${AIRFLOW_POSTGRES_DB}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AIRFLOW_POSTGRES_USER} -d ${AIRFLOW_POSTGRES_DB}"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - airflow-postgres-data:/var/lib/postgresql/data
+
+  # =============
+  # REDIS
+  # =============
+  redis:
+    image: redis:7-alpine
+    container_name: local-data-platform-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - redis-data:/data
+  # ==========================================================
+  # AIRFLOW INIT
+  # ==========================================================
+  airflow-init:
+    <<: *airflow-common
+    container_name: local-data-platform-airflow-init
+    entrypoint:
+      - /bin/bash
+      - -c
+    command:
+      - |
+        set -e
+        if [ ! -s /opt/airflow/config/simple_auth_manager_passwords.json ]; then
+          printf '{"%s":"%s"}\n' "$${AIRFLOW_ADMIN_USERNAME}" "$${AIRFLOW_ADMIN_PASSWORD}" \
+            > /opt/airflow/config/simple_auth_manager_passwords.json
+        fi
+        airflow db migrate
+        echo "airflow db migration completed!"
+    restart: "no"
+  # ==========================================================
+  # AIRFLOW API SERVER
+  # ==========================================================
+  airflow-api-server:
+    <<: *airflow-common
+    container_name: local-data-platform-airflow-api-server
+    command:
+      - api-server
+    ports:
+      - "${AIRFLOW_HOST_PORT}:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "http://localhost:8080/api/v2/monitor/health"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+  # ==========================================================
+  # AIRFLOW SCHEDULER
+  # ==========================================================
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: local-data-platform-airflow-scheduler
+    command:
+      - scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+  # ==========================================================
+  # AIRFLOW DAG PROCESSOR
+  # ==========================================================
+  airflow-dag-processor:
+    <<: *airflow-common
+    container_name: local-data-platform-airflow-dag-processor
+    command:
+      - dag-processor
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+  # ==========================================================
+  # AIRFLOW CELERY WORKER
+  # ==========================================================
+  airflow-worker:
+    <<: *airflow-common
+    container_name: local-data-platform-airflow-worker
+    command:
+      - celery
+      - worker
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+  # ==========================================================
+  # AIRFLOW TRIGGERER
+  # ==========================================================
+  airflow-triggerer:
+    <<: *airflow-common
+    container_name: local-data-platform-airflow-triggerer
+    command:
+      - triggerer
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+  # =============
+  # AIRFLOW CONFUGURATION
+  # =============
 volumes:
-  postgres-data:
+  ecommerce-postgres-data:
+  airflow-postgres-data:
+  redis-data:

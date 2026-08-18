@@ -4,6 +4,7 @@
 .DS_Store
 
 .env
+airflow/config/simple_auth_manager_passwords.json
 .venv.*
 
 data/*

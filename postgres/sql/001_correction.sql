@@ -11,7 +11,7 @@ WHERE orders.order_id = calculated.order_id;
 -- after update total amount in orders -> set total amount to payment
 UPDATE payments
 SET
-	amount = 0,
+	amount = orders.total_amount,
 	updated_at = NOW()
 FROM orders
 WHERE payments.order_id = orders.order_id;

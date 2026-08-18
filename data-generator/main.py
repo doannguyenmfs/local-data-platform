@@ -2,12 +2,22 @@ import psycopg
 from faker import Faker
 from config import DB_CONFIG
 import random
+from pathlib import Path
 
 from generate_customers import generate_customers
 from generate_products import generate_products
 from generate_orders import generate_orders, load_customer_ids
 from generate_order_items import load_ids, generate_order_items
 from generate_payments import load_orders, generate_payments
+
+
+def execute_sql_file(conn, filename: str) -> None:
+    sql_path = Path(__file__).parent.parent / "postgres" / "sql" / filename
+    with conn.cursor() as cur:
+        cur.execute(sql_path.read_text())
+    print(f"Executed {sql_path.name}")
+
+
 def main():
     with psycopg.connect(**DB_CONFIG) as conn:
         # product
@@ -18,7 +28,7 @@ def main():
 
         # order (1 customer - N order)
         customer_ids = load_customer_ids(conn)
-        print(f"Loaded {len(customer_ids):,} customers)
+        print(f"Loaded {len(customer_ids)} customers")
         generate_orders(conn, customer_ids)
 
         # order item (1 order - N item)
@@ -37,6 +47,9 @@ def main():
             f"Loaded {len(orders):,} orders"
         )
         generate_payments(conn, orders)
+
+        # data correction
+        execute_sql_file(conn, "001_correction.sql")
 
 if __name__=="__main__":
     main()
