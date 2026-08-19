@@ -201,6 +201,97 @@ def ecommerce_pipeline():
                     for failure in failures
                 )
             )
+    @task(retries=2)
+    def load_dim_customer():
+        hook = PostgresHook(
+            postgres_conn_id=POSTGRES_CONN_ID
+        )
+
+        hook.run("""
+            -- 1. Close current records that have changed
+            UPDATE analytics.dim_customer AS dim
+            SET
+                valid_to = CURRENT_TIMESTAMP,
+                is_current = FALSE
+            FROM staging.customers AS src
+            WHERE dim.customer_id = src.customer_id
+            AND dim.is_current = TRUE
+            AND dim.record_hash <> md5(
+                    concat_ws(
+                        '||',
+                        src.first_name,
+                        src.last_name,
+                        src.email
+                    )
+            );"""
+        )
+        hook.run("""
+            -- 2. Insert new customers and new versions
+            INSERT INTO analytics.dim_customer (
+                customer_id,
+                first_name,
+                last_name,
+                email,
+                record_hash,
+                valid_from,
+                valid_to,
+                is_current,
+                created_at
+            )
+            SELECT
+                src.customer_id,
+                src.first_name,
+                src.last_name,
+                src.email,
+                md5(
+                    concat_ws(
+                        '||',
+                        src.first_name,
+                        src.last_name,
+                        src.email
+                    )
+                ) AS record_hash,
+                CURRENT_TIMESTAMP AS valid_from,
+                NULL AS valid_to,
+                TRUE AS is_current,
+                CURRENT_TIMESTAMP AS created_at
+            FROM staging.customers AS src
+            LEFT JOIN analytics.dim_customer AS dim
+                ON dim.customer_id = src.customer_id
+            AND dim.is_current = TRUE
+            WHERE dim.customer_id IS NULL;
+        """)
+
+    @task(retries=2)
+    def load_dim_product():
+        hook = PostgresHook(
+            postgres_conn_id=POSTGRES_CONN_ID
+        )
+        hook.run(
+            """
+            INSERT INTO analytics.dim_product (
+                product_id,
+                name,
+                category,
+                price,
+                created_at
+            )
+            SELECT
+                product_id,
+                name,
+                category,
+                price,
+                created_at
+            FROM staging.products
+
+            ON CONFLICT (product_id)
+            DO UPDATE SET
+                name = EXCLUDED.name,
+                category = EXCLUDED.category,
+                price = EXCLUDED.price,
+                created_at = EXCLUDED.created_at;
+            """
+        )
 
     @task(retries=2)
     def transform_fact_sales():
@@ -213,6 +304,7 @@ def ecommerce_pipeline():
                 order_id,
                 order_item_id,
                 customer_id,
+                customer_sk,
                 product_id,
                 order_date,
                 quantity,
@@ -224,6 +316,7 @@ def ecommerce_pipeline():
                 o.order_id,
                 oi.order_item_id,
                 o.customer_id,
+                dc.customer_sk,
                 oi.product_id,
                 o.order_date,
                 oi.quantity,
@@ -242,8 +335,9 @@ def ecommerce_pipeline():
             JOIN staging.order_items oi
                 ON oi.order_id = o.order_id
 
-            JOIN staging.customers c
-                ON c.customer_id = o.customer_id
+            JOIN analytics.dim_customer dc
+                ON dc.customer_id = o.customer_id
+                AND dc.is_current = TRUE
 
             JOIN staging.products pr
                 ON pr.product_id = oi.product_id
@@ -284,37 +378,6 @@ def ecommerce_pipeline():
                 unit_price = EXCLUDED.unit_price,
                 sales_amount = EXCLUDED.sales_amount,
                 payment_status = EXCLUDED.payment_status;
-            """
-        )
-
-    @task(retries=2)
-    def load_dim_product():
-        hook = PostgresHook(
-            postgres_conn_id=POSTGRES_CONN_ID
-        )
-        hook.run(
-            """
-            INSERT INTO analytics.dim_product (
-                product_id,
-                name,
-                category,
-                price,
-                created_at
-            )
-            SELECT
-                product_id,
-                name,
-                category,
-                price,
-                created_at
-            FROM staging.products
-
-            ON CONFLICT (product_id)
-            DO UPDATE SET
-                name = EXCLUDED.name,
-                category = EXCLUDED.category,
-                price = EXCLUDED.price,
-                created_at = EXCLUDED.created_at;
             """
         )
 
@@ -374,8 +437,9 @@ def ecommerce_pipeline():
     validated_record_count = validate_record_count()
     validated_relationships = validate_relationships()
 
-    fact_sale = transform_fact_sales()
+    dim_customer = load_dim_customer()
     dim_product = load_dim_product()
+    fact_sale = transform_fact_sales()
     daily_sales = load_daily_sales()
 
     [
@@ -384,7 +448,7 @@ def ecommerce_pipeline():
         orders,
         order_items,
         payments,
-    ] >> validated_record_count >> validated_relationships >> [fact_sale, dim_product]
-    fact_sale >> daily_sales
+    ] >> validated_record_count >> validated_relationships >> [dim_customer, dim_product]
+    dim_customer >> fact_sale >> daily_sales
 
 ecommerce_pipeline()

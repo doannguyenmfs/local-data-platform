@@ -51,11 +51,16 @@ CREATE TABLE IF NOT EXISTS staging.payments (
 -- ANALYTICS DATA
 -- ==============
 CREATE TABLE IF NOT EXISTS analytics.dim_customer (
-    customer_id UUID PRIMARY KEY,
+    customer_sk BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    customer_id UUID NOT NULL,
     first_name TEXT,
     last_name TEXT,
     email TEXT,
-    created_at TIMESTAMP
+    record_hash TEXT,
+    valid_from TIMESTAMPTZ NOT NULL,
+    valid_to TIMESTAMPTZ,
+    is_current BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS analytics.dim_product (
@@ -70,6 +75,7 @@ CREATE TABLE IF NOT EXISTS analytics.fact_sales (
     order_id UUID,
     order_item_id UUID,
     customer_id UUID,
+    customer_sk BIGINT,
     product_id UUID,
     order_date TIMESTAMP,
     quantity INTEGER,
@@ -87,3 +93,10 @@ CREATE TABLE IF NOT EXISTS analytics.daily_sales (
     total_sales NUMERIC(16, 2),
     paid_sales NUMERIC(16, 2)
 );
+
+-- ==============
+-- Index for analytic
+-- ==============
+CREATE INDEX IF NOT EXISTS idx_dim_customer_is_current
+ON analytics.dim_customer (customer_id)
+WHERE is_current = TRUE;
