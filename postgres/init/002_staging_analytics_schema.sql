@@ -11,7 +11,9 @@ CREATE TABLE IF NOT EXISTS staging.customers (
     first_name TEXT,
     last_name TEXT,
     email TEXT,
-    created_at TIMESTAMP
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ,
+    loaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS staging.products (
@@ -19,15 +21,20 @@ CREATE TABLE IF NOT EXISTS staging.products (
     name TEXT,
     category TEXT,
     price NUMERIC(12, 2),
-    created_at TIMESTAMP
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ,
+    loaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS staging.orders (
     order_id UUID PRIMARY KEY,
     customer_id UUID,
-    order_date TIMESTAMP,
+    order_date TIMESTAMPTZ,
     status TEXT,
-    total_amount NUMERIC(14, 2)
+    total_amount NUMERIC(14, 2),
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ,
+    loaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS staging.order_items (
@@ -35,7 +42,10 @@ CREATE TABLE IF NOT EXISTS staging.order_items (
     order_id UUID,
     product_id UUID,
     quantity INTEGER,
-    unit_price NUMERIC(12, 2)
+    unit_price NUMERIC(12, 2),
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ,
+    loaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS staging.payments (
@@ -44,7 +54,10 @@ CREATE TABLE IF NOT EXISTS staging.payments (
     amount NUMERIC(14, 2),
     payment_method TEXT,
     payment_status TEXT,
-    paid_at TIMESTAMP
+    paid_at TIMESTAMP,
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ,
+    loaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ==============

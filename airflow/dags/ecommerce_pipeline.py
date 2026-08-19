@@ -28,7 +28,8 @@ def ecommerce_pipeline():
                 first_name,
                 last_name,
                 email,
-                created_at
+                created_at,
+                updated_at
             FROM public.customers;
         """)
 
@@ -46,7 +47,8 @@ def ecommerce_pipeline():
                 name,
                 category,
                 price,
-                created_at
+                created_at,
+                updated_at
             FROM public.products;
         """)
 
@@ -64,7 +66,9 @@ def ecommerce_pipeline():
                 customer_id,
                 order_date,
                 status,
-                total_amount
+                total_amount,
+                created_at,
+                updated_at
             FROM public.orders;
         """)
     
@@ -82,7 +86,9 @@ def ecommerce_pipeline():
                 order_id,
                 product_id,
                 quantity,
-                unit_price
+                unit_price,
+                created_at,
+                updated_at
             FROM public.order_items;
         """)
     
@@ -101,7 +107,9 @@ def ecommerce_pipeline():
                 amount,
                 payment_method,
                 status,
-                paid_at
+                paid_at,
+                created_at,
+                updated_at
             FROM public.payments;
         """)
 

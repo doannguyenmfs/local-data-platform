@@ -1,0 +1,6 @@
+CREATE SCHEMA IF NOT EXISTS metadata;
+CREATE TABLE IF NOT EXISTS metadata.etl_watermark (
+    pipeline_name TEXT PRIMARY KEY,
+    watermark_value TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+)

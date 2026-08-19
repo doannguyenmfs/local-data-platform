@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS order_items(
     quantity INTEGER NOT NULL,
     unit_price NUMERIC(12, 2) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT order_items_order_fk
         FOREIGN KEY (order_id)
         REFERENCES orders(order_id)

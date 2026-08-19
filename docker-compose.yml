@@ -65,6 +65,7 @@ services:
     volumes:
       - ecommerce-postgres-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./postgres/sql:/opt/postgres-sql-statemet
     # container memory limit
     # should remove limit when the data become very large
     mem_limit: 2g
