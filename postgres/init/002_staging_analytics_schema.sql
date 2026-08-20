@@ -110,6 +110,6 @@ CREATE TABLE IF NOT EXISTS analytics.daily_sales (
 -- ==============
 -- Index for analytic
 -- ==============
-CREATE INDEX IF NOT EXISTS idx_dim_customer_is_current
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dim_customer_is_current
 ON analytics.dim_customer (customer_id)
 WHERE is_current = TRUE;

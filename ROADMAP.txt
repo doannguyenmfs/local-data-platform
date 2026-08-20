@@ -3,8 +3,8 @@
 | 1     | Airflow fundamentals     | DAG/task/dependency                             |
 | 2     | Advanced orchestration   | parallelism, validation, retries                |
 | 3     | Data Warehouse           | dimensions, SCD2, facts, marts                  |
-| **4** | **Incremental Pipeline** | **watermark, idempotency, backfill, late data** |
-| **5** | **dbt**                  | **transformation engineering, tests, lineage**  |
+| **4** | **Incremental Pipeline 📍** | **watermark ✅, idempotency ✅, backfill ✅, late data 📍** |
+| **5** | **dbt**                    | **modeling, tests, documentation, lineage**        |
 | **6** | **Spark**                | **distributed batch processing**                |
 | **7** | **Iceberg**              | **lakehouse/table format**                      |
 | **8** | **Kafka**                | **streaming/event-driven architecture**         |
