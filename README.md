@@ -30,6 +30,10 @@
                     ▼
              ALERTING
 
+The ecommerce DAG runs daily. Scheduled runs use the committed watermark for
+incremental extraction; `catchup=False` prevents historical scheduled runs from
+being created automatically.
+
 ## Backfill
 
 Trigger an explicit `[start, end)` historical window without changing the
