@@ -36,6 +36,7 @@ x-airflow-common: &airflow-common
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
       - ./airflow/config:/opt/airflow/config
+      - ./postgres:/opt/postgres-sql-statement
     depends_on:
       airflow-postgres:
         condition: service_healthy
@@ -65,7 +66,6 @@ services:
     volumes:
       - ecommerce-postgres-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
-      - ./postgres/sql:/opt/postgres-sql-statemet
     # container memory limit
     # should remove limit when the data become very large
     mem_limit: 2g

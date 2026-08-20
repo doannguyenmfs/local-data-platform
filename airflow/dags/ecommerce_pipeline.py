@@ -4,114 +4,149 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 from datetime import datetime
 
 POSTGRES_CONN_ID="ecommerce_postgres"
+PIPELINE_NAMES = {
+    "staging_customers",
+    "staging_products",
+    "staging_orders",
+    "staging_order_items",
+    "staging_payments",
+}
+
+
+def extract_incremental(
+    table_name, primary_key, target_columns, source_columns=None
+):
+    """Upsert one closed source window into staging and return its boundaries."""
+    hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+    pipeline_name = f"staging_{table_name}"
+
+    watermark_row = hook.get_first(
+        """
+        SELECT watermark_value
+        FROM metadata.etl_watermark
+        WHERE pipeline_name = %s;
+        """,
+        parameters=(pipeline_name,),
+    )
+    if watermark_row is None:
+        raise ValueError(f"Missing watermark for pipeline: {pipeline_name}")
+
+    lower_bound = watermark_row[0]
+    upper_bound = hook.get_first(
+        f"SELECT COALESCE(MAX(updated_at), %s) FROM public.{table_name};",
+        parameters=(lower_bound,),
+    )[0]
+
+    source_columns = source_columns or target_columns
+    target_column_list = ", ".join(target_columns)
+    source_column_list = ", ".join(source_columns)
+    update_columns = [
+        column for column in target_columns if column != primary_key
+    ]
+    update_clause = ",\n".join(
+        f"{column} = EXCLUDED.{column}" for column in update_columns
+    )
+
+    hook.run(
+        f"""
+        WITH staged_batch AS (
+            INSERT INTO staging.{table_name} ({target_column_list})
+            SELECT {source_column_list}
+            FROM public.{table_name}
+            WHERE updated_at > %s
+              AND updated_at <= %s
+            ON CONFLICT ({primary_key})
+            DO UPDATE SET
+                {update_clause},
+                loaded_at = CURRENT_TIMESTAMP
+            RETURNING {primary_key}
+        )
+
+        UPDATE metadata.etl_watermark
+        SET candidate_value = GREATEST(
+            COALESCE(candidate_value, %s),
+            %s
+        )
+        WHERE pipeline_name = %s;
+        """,
+        parameters=(
+            lower_bound,
+            upper_bound,
+            upper_bound,
+            upper_bound,
+            pipeline_name,
+        ),
+    )
 
 @dag(
     dag_id="ecommerce_pipeline",
     start_date=datetime(2026, 1, 1),
     schedule=None,
     catchup=False,
+    max_active_runs=1,
     tags=["ecommerce", "production"]
 )
 
 def ecommerce_pipeline():
     @task(retries=2)
     def extract_customers():
-        hook = PostgresHook(
-            postgres_conn_id=POSTGRES_CONN_ID
+        return extract_incremental(
+            "customers",
+            "customer_id",
+            [
+                "customer_id", "first_name", "last_name", "email",
+                "created_at", "updated_at",
+            ],
         )
-        hook.run("""
-            TRUNCATE staging.customers;
-
-            INSERT INTO staging.customers
-            SELECT
-                customer_id,
-                first_name,
-                last_name,
-                email,
-                created_at,
-                updated_at
-            FROM public.customers;
-        """)
 
     @task(retries=2)
     def extract_products():
-        hook = PostgresHook(
-            postgres_conn_id=POSTGRES_CONN_ID
+        return extract_incremental(
+            "products",
+            "product_id",
+            [
+                "product_id", "name", "category", "price",
+                "created_at", "updated_at",
+            ],
         )
-        hook.run("""
-            TRUNCATE staging.products;
-
-            INSERT INTO staging.products
-            SELECT
-                product_id,
-                name,
-                category,
-                price,
-                created_at,
-                updated_at
-            FROM public.products;
-        """)
 
     @task(retries=2)
     def extract_orders():
-        hook = PostgresHook(
-            postgres_conn_id=POSTGRES_CONN_ID
+        return extract_incremental(
+            "orders",
+            "order_id",
+            [
+                "order_id", "customer_id", "order_date", "status",
+                "total_amount", "created_at", "updated_at",
+            ],
         )
-        hook.run("""
-            TRUNCATE staging.orders;
-
-            INSERT INTO staging.orders
-            SELECT
-                order_id,
-                customer_id,
-                order_date,
-                status,
-                total_amount,
-                created_at,
-                updated_at
-            FROM public.orders;
-        """)
     
     @task(retries=2)
     def extract_order_items():
-        hook = PostgresHook(
-            postgres_conn_id=POSTGRES_CONN_ID
+        return extract_incremental(
+            "order_items",
+            "order_item_id",
+            [
+                "order_item_id", "order_id", "product_id", "quantity",
+                "unit_price", "created_at", "updated_at",
+            ],
         )
-        hook.run("""
-            TRUNCATE staging.order_items;
-
-            INSERT INTO staging.order_items
-            SELECT
-                order_item_id,
-                order_id,
-                product_id,
-                quantity,
-                unit_price,
-                created_at,
-                updated_at
-            FROM public.order_items;
-        """)
     
     @task(retries=2)
     def extract_payments():
-        hook = PostgresHook(
-            postgres_conn_id=POSTGRES_CONN_ID
+        return extract_incremental(
+            "payments",
+            "payment_id",
+            [
+                "payment_id", "order_id", "amount", "payment_method",
+                "payment_status",
+                "paid_at", "created_at", "updated_at",
+            ],
+            [
+                "payment_id", "order_id", "amount", "payment_method",
+                "status", "paid_at", "created_at", "updated_at",
+            ],
         )
-        hook.run("""
-            TRUNCATE staging.payments;
-            
-            INSERT INTO staging.payments
-            SELECT
-                payment_id,
-                order_id,
-                amount,
-                payment_method,
-                status,
-                paid_at,
-                created_at,
-                updated_at
-            FROM public.payments;
-        """)
 
     @task(retries=2)
     def validate_record_count():
@@ -380,6 +415,7 @@ def ecommerce_pipeline():
             )
             DO UPDATE SET
                 customer_id = EXCLUDED.customer_id,
+                customer_sk = EXCLUDED.customer_sk,
                 product_id = EXCLUDED.product_id,
                 order_date = EXCLUDED.order_date,
                 quantity = EXCLUDED.quantity,
@@ -394,6 +430,7 @@ def ecommerce_pipeline():
         hook = PostgresHook(
             postgres_conn_id=POSTGRES_CONN_ID
         )
+
         hook.run(
             """
             INSERT INTO analytics.daily_sales (
@@ -435,6 +472,44 @@ def ecommerce_pipeline():
                 paid_sales = EXCLUDED.paid_sales;
             """
         )
+
+    @task(retries=2)
+    def advance_watermarks():
+        """Commit source windows only after all warehouse loads succeed."""
+        hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+        candidate_rows = hook.get_records(
+            """
+            SELECT pipeline_name
+            FROM metadata.etl_watermark
+            WHERE pipeline_name = ANY(%s)
+              AND candidate_value IS NOT NULL;
+            """,
+            parameters=(list(PIPELINE_NAMES),),
+        )
+        candidates = {row[0] for row in candidate_rows}
+        missing_candidates = PIPELINE_NAMES - candidates
+
+        if missing_candidates:
+            raise ValueError(
+                "Cannot advance incomplete watermark batch: "
+                + ", ".join(sorted(missing_candidates))
+            )
+
+        hook.run(
+            """
+            UPDATE metadata.etl_watermark
+            SET
+                watermark_value = GREATEST(
+                    watermark_value,
+                    candidate_value
+                ),
+                candidate_value = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE pipeline_name = ANY(%s)
+              AND candidate_value IS NOT NULL;
+            """,
+            parameters=(list(PIPELINE_NAMES),),
+        )
         
     customers = extract_customers()
     products = extract_products()
@@ -449,6 +524,7 @@ def ecommerce_pipeline():
     dim_product = load_dim_product()
     fact_sale = transform_fact_sales()
     daily_sales = load_daily_sales()
+    watermarks = advance_watermarks()
 
     [
         customers,
@@ -458,5 +534,6 @@ def ecommerce_pipeline():
         payments,
     ] >> validated_record_count >> validated_relationships >> [dim_customer, dim_product]
     dim_customer >> fact_sale >> daily_sales
+    [daily_sales, dim_product] >> watermarks
 
 ecommerce_pipeline()
