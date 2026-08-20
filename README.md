@@ -10,10 +10,10 @@
                  backfill ✅
                     │
                     ▼
-                 CURRENT
+          late data ⏸ deferred
                     │
                     ▼
-                late data
+                 CURRENT
                     │
                     ▼
               dbt + DQ

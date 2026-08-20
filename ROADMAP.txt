@@ -3,8 +3,8 @@
 | 1     | Airflow fundamentals     | DAG/task/dependency                             |
 | 2     | Advanced orchestration   | parallelism, validation, retries                |
 | 3     | Data Warehouse           | dimensions, SCD2, facts, marts                  |
-| **4** | **Incremental Pipeline 📍** | **watermark ✅, idempotency ✅, backfill ✅, late data 📍** |
-| **5** | **dbt**                    | **modeling, tests, documentation, lineage**        |
+| **4** | **Incremental Pipeline ✅** | **watermark ✅, idempotency ✅, backfill ✅, late data ⏸ deferred** |
+| **5** | **dbt 📍**                  | **modeling, tests, documentation, lineage**                  |
 | **6** | **Spark**                | **distributed batch processing**                |
 | **7** | **Iceberg**              | **lakehouse/table format**                      |
 | **8** | **Kafka**                | **streaming/event-driven architecture**         |
@@ -36,7 +36,7 @@
                 │ + Aggregation       │
                 └──────────┬──────────┘
                            │
-                    📍 WE ARE HERE
+                       ✅ COMPLETE
                            │
                            ▼
                 ┌─────────────────────┐
@@ -45,8 +45,10 @@
                 │ Watermark           │
                 │ Idempotency         │
                 │ Backfill             │
-                │ Late Data            │
+                │ Late Data: DEFERRED  │
                 └──────────┬──────────┘
+                           │
+                    📍 WE ARE HERE
                            │
                            ▼
                 ┌─────────────────────┐
@@ -93,3 +95,14 @@
              │ Iceberg                     │
              │ Kafka                       │
              └─────────────────────────────┘
+
+
+DEFERRED / ACCEPTED RISK
+------------------------
+Late-arriving data is intentionally deferred because its expected frequency is
+currently very low. The accepted limitation is that a record arriving with an
+updated_at older than the committed watermark will not be picked up by the
+normal incremental run. Use an explicit backfill when such a case is detected.
+Revisit this decision when source latency becomes measurable or operationally
+significant; likely controls are a lookback window, ingestion timestamp, CDC,
+and late-data monitoring.
