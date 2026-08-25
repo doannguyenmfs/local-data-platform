@@ -1,0 +1,79 @@
+version: 2
+
+models:
+  - name: stg_customers
+    description: Clean staging interface for customer data loaded by Airflow.
+    columns:
+      - name: customer_id
+        description: Unique identifier of a customer.
+        data_tests:
+          - not_null
+          - unique
+
+  - name: stg_products
+    description: Clean staging view of product data loaded by Airflow.
+    columns:
+      - name: product_id
+        description: Unique identifier of a product.
+        data_tests:
+          - not_null
+          - unique
+
+  - name: stg_orders
+    description: Clean staging view of order data loaded by Airflow.
+    columns:
+      - name: order_id
+        description: Unique identifier of an order.
+        data_tests:
+          - not_null
+          - unique
+      - name: customer_id
+        description: ...
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_customers')
+                field: customer_id
+
+  - name: stg_order_items
+    description: Clean staging view of order line-item data loaded by Airflow.
+    columns:
+      - name: order_item_id
+        description: Unique identifier of an order line item.
+        data_tests:
+          - not_null
+          - unique
+      - name: order_id
+        description: Order containing this item.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_orders')
+                field: order_id
+      - name: product_id
+        description: Product referenced by this order item.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_products')
+                field: product_id
+
+  - name: stg_payments
+    description: Clean staging view of payment data loaded by Airflow.
+    columns:
+      - name: payment_id
+        description: Unique identifier of a payment.
+        data_tests:
+          - not_null
+          - unique
+      - name: order_id
+        description: Order associated with this payment.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_orders')
+                field: order_id

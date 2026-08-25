@@ -1,0 +1,8 @@
+name: local_data_platform
+version: 1.0.0
+config-version: 2
+
+profile: local_data_platform
+
+model-paths: ["models"]
+clean-targets: ["target", "logs", "dbt_packages"]

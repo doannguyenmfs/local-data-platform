@@ -1,0 +1,30 @@
+set -a
+source .env
+set +a
+
+dbt/.venv/bin/dbt compile \
+  --project-dir dbt \
+  --profiles-dir dbt \
+  --select stg_customers
+
+
+
+dbt/.venv/bin/dbt run \
+  --project-dir dbt \
+  --profiles-dir dbt \
+  --select stg_customers
+
+
+dbt/.venv/bin/dbt show \
+  --project-dir dbt \
+  --profiles-dir dbt \
+  --inline "
+    select
+        (select count(*) from {{ source('staging', 'customers') }}) as source_count,
+        (select count(*) from {{ ref('stg_customers') }}) as model_count
+  "
+
+dbt/.venv/bin/dbt ls --project-dir dbt --profiles-dir dbt --select 'path:models/staging'
+dbt/.venv/bin/dbt build --project-dir dbt --profiles-dir dbt --select 'path:models/staging'
+
+dbt/.venv/bin/dbt test --project-dir dbt --profiles-dir dbt --select stg_customers

@@ -1,0 +1,18 @@
+version: 2
+
+sources:
+  - name: staging
+    description: Raw data of staging what airflow extract into SQL
+    schema: staging
+    tables:
+      - name: customers
+        description: Staging customers
+      - name: products
+        description: Staging products
+      - name: orders
+        description: Staging orders
+      - name: order_items
+        description: Staging order_items
+      - name: payments
+        description: Staging payments
+        

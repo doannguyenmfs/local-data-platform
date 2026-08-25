@@ -1,0 +1,53 @@
+version: 2
+
+models:
+  - name: int_payments_by_order
+    description: >
+      Payment attempts aggregated to one row per order.
+      Grain: one row per order that has at least one payment attempt.
+
+    columns:
+      - name: order_id
+        description: Order associated with the aggregated payment attempts.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: payment_status
+        description: Derived payment state of the order.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - paid
+                  - partially_paid
+                  - unpaid
+
+  - name: int_sales_order_items
+    description: >
+      Order-item-level sales data enriched with order and payment information.
+      Grain: one row per order item.
+
+    columns:
+      - name: order_item_id
+        description: Unique identifier establishing the model grain.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: sales_amount
+        description: Quantity multiplied by unit price.
+        data_tests:
+          - not_null
+
+      - name: payment_status
+        description: Derived payment state of the associated order.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - paid
+                  - partially_paid
+                  - unpaid
