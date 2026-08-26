@@ -60,3 +60,118 @@ models:
         data_tests:
           - not_null
 
+  - name: fact_sales
+    description: >
+      Order-item-level sales fact enriched with the customer version
+      effective at the order time.
+      Grain: one row per order item.
+
+    columns:
+      - name: order_item_id
+        description: Unique identifier establishing the fact grain.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: order_id
+        description: Order containing the item.
+        data_tests:
+          - not_null
+
+      - name: customer_sk
+        description: Surrogate key of the customer version resolved at order time.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: customer_sk
+
+      - name: customer_id
+        description: Stable customer business identifier retained for traceability.
+        data_tests:
+          - not_null
+
+      - name: product_id
+        description: Product associated with the sold item.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_id
+
+      - name: order_date
+        description: Timestamp at which the order occurred.
+        data_tests:
+          - not_null
+
+      - name: quantity
+        description: Quantity sold for the order item.
+        data_tests:
+          - not_null
+
+      - name: unit_price
+        description: Product price recorded at transaction time.
+        data_tests:
+          - not_null
+
+      - name: sales_amount
+        description: Quantity multiplied by transaction unit price.
+        data_tests:
+          - not_null
+
+      - name: payment_status
+        description: Derived payment status of the associated order.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - paid
+                  - partially_paid
+                  - unpaid
+
+      - name: customer_key_resolution
+        description: >
+          Method used to resolve the customer version. as_of is an exact
+          temporal match; earliest_available is the initial-history fallback.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - as_of
+                  - earliest_available
+
+  - name: daily_sales
+    description: >
+      Daily sales aggregate derived from fact_sales.
+      Grain: one row per sales date.
+
+    columns:
+      - name: sales_date
+        description: Calendar date on which the orders occurred.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: total_orders
+        description: Number of distinct orders placed on the date.
+        data_tests:
+          - not_null
+
+      - name: total_items
+        description: Total quantity of items sold on the date.
+        data_tests:
+          - not_null
+
+      - name: total_sales
+        description: Gross sales amount for all order items on the date.
+        data_tests:
+          - not_null
+
+      - name: paid_sales
+        description: Sales amount belonging to orders classified as paid.
+        data_tests:
+          - not_null
