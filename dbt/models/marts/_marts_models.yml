@@ -17,7 +17,7 @@ models:
         data_tests:
           - not_null
       - name: category
-        description: ...\
+        description: ...
         data_tests:
           - not_null
           - accepted_values:
@@ -36,4 +36,27 @@ models:
       - name: price
         description: ...
         data_tests:
-          - not_null  
+          - not_null
+  - name: dim_customer
+    description: >
+      Type-2 slowly changed customer Dimension
+      Grain: one row per customer version
+    columns:
+      - name: customer_sk
+        description: Unique surrogate key of a customer version
+        data_tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: Customer ID shared across by customer version
+        data_tests:
+          - not_null
+      - name: valid_from
+        description: Timestamp that the version becom effective
+        data_tests:
+          - not_null
+      - name: is_current
+        description: Indicate whether this version is the current version
+        data_tests:
+          - not_null
+

@@ -39,3 +39,16 @@ dbt/.venv/bin/dbt build \
   --profiles-dir dbt \
   --select 'path:models/staging' \
   --indirect-selection cautious
+
+dbt/.venv/bin/dbt show \ 
+  --project-dir dbt \
+  --profiles-dir dbt \
+  --inline "                                                                                                                                                    
+    select                     
+        count(*) as total_versions,
+        count(*) filter (
+            where is_current
+        ) as current_customers,
+        count(distinct customer_id) as distinct_customers
+    from {{ ref('dim_customer') }}
+  "
