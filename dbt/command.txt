@@ -26,5 +26,16 @@ dbt/.venv/bin/dbt show \
 
 dbt/.venv/bin/dbt ls --project-dir dbt --profiles-dir dbt --select 'path:models/staging'
 dbt/.venv/bin/dbt build --project-dir dbt --profiles-dir dbt --select 'path:models/staging'
-
+dbt/.venv/bin/dbt build --project-dir dbt --profiles-dir dbt --select 'path:models/intermediate path:tests/intermediate'
 dbt/.venv/bin/dbt test --project-dir dbt --profiles-dir dbt --select stg_customers
+dbt/.venv/bin/dbt parse \
+  --project-dir dbt \
+  --profiles-dir dbt \
+  --no-partial-parse
+
+
+dbt/.venv/bin/dbt build \
+  --project-dir dbt \
+  --profiles-dir dbt \
+  --select 'path:models/staging' \
+  --indirect-selection cautious
