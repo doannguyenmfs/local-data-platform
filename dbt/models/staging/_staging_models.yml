@@ -2,33 +2,81 @@ version: 2
 
 models:
   - name: stg_customers
-    description: Clean staging interface for customer data loaded by Airflow.
+    description: >
+      Stable dbt interface over customer data loaded by Airflow.
+      Grain: one row per customer.
+
     columns:
       - name: customer_id
-        description: Unique identifier of a customer.
+        description: Stable source identifier of the customer.
         data_tests:
           - not_null
           - unique
+
+      - name: first_name
+        description: Customer first name from the source system.
+
+      - name: last_name
+        description: Customer last name from the source system.
+
+      - name: email
+        description: Customer email address from the source system.
+
+      - name: created_at
+        description: Timestamp when the customer was created in the source system.
+
+      - name: updated_at
+        description: Timestamp of the latest source-side customer change.
+
+      - name: loaded_at
+        description: Timestamp when Airflow last loaded the record into staging.
 
   - name: stg_products
-    description: Clean staging view of product data loaded by Airflow.
+    description: >
+      Stable dbt interface over the current product catalog loaded by Airflow.
+      Grain: one row per product.
+
     columns:
       - name: product_id
-        description: Unique identifier of a product.
+        description: Stable source identifier of the product.
         data_tests:
           - not_null
           - unique
 
+      - name: name
+        description: Current product name.
+
+      - name: category
+        description: Current product category.
+
+      - name: price
+        description: >
+          Current catalog price. This is not necessarily the price recorded
+          when an order item was purchased.
+
+      - name: created_at
+        description: Timestamp when the product was created in the source system.
+
+      - name: updated_at
+        description: Timestamp of the latest source-side product change.
+
+      - name: loaded_at
+        description: Timestamp when Airflow last loaded the record into staging.
+
   - name: stg_orders
-    description: Clean staging view of order data loaded by Airflow.
+    description: >
+      Stable dbt interface over ecommerce order headers loaded by Airflow.
+      Grain: one row per order.
+
     columns:
       - name: order_id
-        description: Unique identifier of an order.
+        description: Stable source identifier of the order.
         data_tests:
           - not_null
           - unique
+
       - name: customer_id
-        description: ...
+        description: Customer that placed the order.
         data_tests:
           - not_null
           - relationships:
@@ -36,24 +84,49 @@ models:
                 to: ref('stg_customers')
                 field: customer_id
 
+      - name: order_date
+        description: Business timestamp at which the order occurred.
+
+      - name: status
+        description: Current operational status of the order.
+
+      - name: total_amount
+        description: >
+          Order-header amount supplied by the source system. This value is
+          distinct from sales_amount calculated from individual order items.
+
+      - name: created_at
+        description: Timestamp when the order was created in the source system.
+
+      - name: updated_at
+        description: Timestamp of the latest source-side order change.
+
+      - name: loaded_at
+        description: Timestamp when Airflow last loaded the record into staging.
+
   - name: stg_order_items
-    description: Clean staging view of order line-item data loaded by Airflow.
+    description: >
+      Stable dbt interface over ecommerce order line items loaded by Airflow.
+      Grain: one row per order item.
+
     columns:
       - name: order_item_id
-        description: Unique identifier of an order line item.
+        description: Stable source identifier establishing the model grain.
         data_tests:
           - not_null
           - unique
+
       - name: order_id
-        description: Order containing this item.
+        description: Order containing the line item.
         data_tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('stg_orders')
                 field: order_id
+
       - name: product_id
-        description: Product referenced by this order item.
+        description: Product sold on the line item.
         data_tests:
           - not_null
           - relationships:
@@ -61,19 +134,59 @@ models:
                 to: ref('stg_products')
                 field: product_id
 
+      - name: quantity
+        description: Number of product units recorded on the line item.
+
+      - name: unit_price
+        description: Transaction price for one product unit.
+
+      - name: created_at
+        description: Timestamp when the line item was created in the source system.
+
+      - name: updated_at
+        description: Timestamp of the latest source-side line-item change.
+
+      - name: loaded_at
+        description: Timestamp when Airflow last loaded the record into staging.
+
   - name: stg_payments
-    description: Clean staging view of payment data loaded by Airflow.
+    description: >
+      Stable dbt interface over payment attempts loaded by Airflow.
+      Grain: one row per payment attempt.
+
     columns:
       - name: payment_id
-        description: Unique identifier of a payment.
+        description: Stable source identifier of the payment attempt.
         data_tests:
           - not_null
           - unique
+
       - name: order_id
-        description: Order associated with this payment.
+        description: Order associated with the payment attempt.
         data_tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('stg_orders')
                 field: order_id
+
+      - name: amount
+        description: Amount submitted in the payment attempt.
+
+      - name: payment_method
+        description: Method used for the payment attempt.
+
+      - name: payment_status
+        description: Operational status of the payment attempt.
+
+      - name: paid_at
+        description: Timestamp at which the payment completed, when applicable.
+
+      - name: created_at
+        description: Timestamp when the payment attempt was created in the source.
+
+      - name: updated_at
+        description: Timestamp of the latest source-side payment change.
+
+      - name: loaded_at
+        description: Timestamp when Airflow last loaded the record into staging.

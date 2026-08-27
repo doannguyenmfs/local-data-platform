@@ -4,20 +4,20 @@ version: 2
 models:
   - name: dim_product
     description: >
-      Dimension of current state of product used by analytic mart
-      Grain: one row per product
+      Current-state product dimension used by analytical models.
+      Grain: one row per product.
     columns:
       - name: product_id
-        description: ...
+        description: Stable business identifier of the product.
         data_tests:
           - unique
           - not_null
       - name: name
-        description: ...
+        description: Current product name.
         data_tests:
           - not_null
       - name: category
-        description: ...
+        description: Current product category.
         data_tests:
           - not_null
           - accepted_values:
@@ -34,31 +34,60 @@ models:
               config:
                 severity: warn
       - name: price
-        description: ...
+        description: Current catalog price of the product.
         data_tests:
           - not_null
+
+      - name: created_at
+        description: Timestamp when the product was created in the source system.
+
+      - name: updated_at
+        description: Timestamp of the latest source-side product change.
+
   - name: dim_customer
     description: >
-      Type-2 slowly changed customer Dimension
-      Grain: one row per customer version
+      Type-2 slowly changing customer dimension built from snap_customers.
+      Grain: one row per customer version.
     columns:
       - name: customer_sk
-        description: Unique surrogate key of a customer version
+        description: Unique surrogate key identifying one customer version.
         data_tests:
           - unique
           - not_null
       - name: customer_id
-        description: Customer ID shared across by customer version
+        description: Stable business identifier shared by customer versions.
         data_tests:
           - not_null
+
+      - name: first_name
+        description: Customer first name for this historical version.
+
+      - name: last_name
+        description: Customer last name for this historical version.
+
+      - name: email
+        description: Customer email address for this historical version.
+
       - name: valid_from
-        description: Timestamp that the version becom effective
+        description: Inclusive timestamp when this version became effective.
         data_tests:
           - not_null
+
+      - name: valid_to
+        description: >
+          Exclusive timestamp when this version stopped being effective;
+          null for the currently active version.
+
       - name: is_current
-        description: Indicate whether this version is the current version
+        description: Indicates whether this is the currently effective version.
         data_tests:
           - not_null
+
+      - name: created_at
+        description: Timestamp when the customer was created in the source system.
+
+      - name: updated_at
+        description: Source effective-change timestamp for this customer version.
 
   - name: fact_sales
     description: >
@@ -106,6 +135,9 @@ models:
         data_tests:
           - not_null
 
+      - name: order_status
+        description: Operational status of the order.
+
       - name: quantity
         description: Quantity sold for the order item.
         data_tests:
@@ -131,6 +163,9 @@ models:
                   - paid
                   - partially_paid
                   - unpaid
+
+      - name: payment_attempt_count
+        description: Number of payment attempts recorded for the order.
 
       - name: customer_key_resolution
         description: >

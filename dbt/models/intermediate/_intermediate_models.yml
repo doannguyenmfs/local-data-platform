@@ -3,7 +3,7 @@ version: 2
 models:
   - name: int_payments_by_order
     description: >
-      Payment attempts aggregated to one row per order.
+      Payment attempts aggregated into an order-level payment state.
       Grain: one row per order that has at least one payment attempt.
 
     columns:
@@ -13,8 +13,13 @@ models:
           - not_null
           - unique
 
+      - name: payment_attempt_count
+        description: Number of payment attempts recorded for the order.
+
       - name: payment_status
-        description: Derived payment state of the order.
+        description: >
+          Derived state: paid when all attempts completed, partially_paid when
+          at least one completed, otherwise unpaid.
         data_tests:
           - not_null
           - accepted_values:
@@ -30,11 +35,32 @@ models:
       Grain: one row per order item.
 
     columns:
+      - name: order_id
+        description: Order containing the sales line.
+
       - name: order_item_id
         description: Unique identifier establishing the model grain.
         data_tests:
           - not_null
           - unique
+
+      - name: customer_id
+        description: Customer that placed the order.
+
+      - name: product_id
+        description: Product sold on the order item.
+
+      - name: order_date
+        description: Business timestamp at which the order occurred.
+
+      - name: order_status
+        description: Operational status inherited from the order header.
+
+      - name: quantity
+        description: Number of product units on the order item.
+
+      - name: unit_price
+        description: Transaction price for one product unit.
 
       - name: sales_amount
         description: Quantity multiplied by unit price.
@@ -51,3 +77,6 @@ models:
                   - paid
                   - partially_paid
                   - unpaid
+
+      - name: payment_attempt_count
+        description: Number of payment attempts for the order; zero when absent.

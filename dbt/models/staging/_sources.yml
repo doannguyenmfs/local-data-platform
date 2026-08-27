@@ -2,7 +2,7 @@ version: 2
 
 sources:
   - name: staging
-    description: Raw data of staging what airflow extract into SQL
+    description: "{{ doc('staging_source') }}"
     schema: staging
     tables:
       - name: customers

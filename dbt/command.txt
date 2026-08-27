@@ -52,3 +52,13 @@ dbt/.venv/bin/dbt show \
         count(distinct customer_id) as distinct_customers
     from {{ ref('dim_customer') }}
   "
+
+dbt/.venv/bin/dbt docs generate \
+  --project-dir dbt \
+  --profiles-dir dbt
+
+dbt/.venv/bin/dbt docs serve \
+  --project-dir dbt \
+  --profiles-dir dbt \
+  --port 8081 \                   
+  --no-browser
