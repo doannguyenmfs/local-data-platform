@@ -1,5 +1,8 @@
 x-airflow-common: &airflow-common
-    image: ${AIRFLOW_IMAGE}
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
+    image: local-data-platform-airflow:3.3.0-dbt1.12
     user: "${AIRFLOW_UID}:0"
     environment:
       # --------------------------------------------------------
@@ -31,13 +34,34 @@ x-airflow-common: &airflow-common
       AIRFLOW__API__BASE_URL: http://airflow-api-server:8080
       AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
       AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_API_AUTH_JWT_SECRET}
+
+      DBT_PROJECT_DIR: /opt/airflow/dbt
+      DBT_PROFILES_DIR: /opt/airflow/dbt
+
+      ECOMMERCE_POSTGRES_HOST: postgres
+      ECOMMERCE_POSTGRES_HOST_PORT: ${ECOMMERCE_POSTGRES_PORT}
+      ECOMMERCE_POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
+      ECOMMERCE_POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
+      ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
     volumes:
+      # Airflow files
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
       - ./airflow/config:/opt/airflow/config
       - ./postgres:/opt/postgres-sql-statement
+      # dbt project source
+      # Only source-controlled dbt files are mounted.
+      # Host .venv, target and logs are intentionally excluded.
+      - ./dbt/dbt_project.yml:/opt/airflow/dbt/dbt_project.yml:ro
+      - ./dbt/profiles.yml:/opt/airflow/dbt/profiles.yml:ro
+      - ./dbt/models:/opt/airflow/dbt/models:ro
+      - ./dbt/snapshots:/opt/airflow/dbt/snapshots:ro
+      - ./dbt/tests:/opt/airflow/dbt/tests:ro
+      - ./dbt/docs:/opt/airflow/dbt/docs:ro
     depends_on:
+      postgres:
+        condition: service_healthy
       airflow-postgres:
         condition: service_healthy
       redis:

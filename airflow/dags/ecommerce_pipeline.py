@@ -1,10 +1,15 @@
-from airflow.decorators import dag, task
-from airflow.models.param import Param
+from datetime import datetime, timedelta
+import os
+import subprocess
+
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.sdk import Param, dag, task
 
-from datetime import datetime
 
-POSTGRES_CONN_ID="ecommerce_postgres"
+POSTGRES_CONN_ID = "ecommerce_postgres"
+DBT_EXECUTABLE = "/opt/dbt-venv/bin/dbt"
+DBT_PROJECT_DIR = os.getenv("DBT_PROJECT_DIR", "/opt/airflow/dbt")
+DBT_PROFILES_DIR = os.getenv("DBT_PROFILES_DIR", "/opt/airflow/dbt")
 PIPELINE_NAMES = {
     "staging_customers",
     "staging_products",
@@ -315,234 +320,44 @@ def ecommerce_pipeline():
                     for failure in failures
                 )
             )
-    @task(retries=2)
-    def load_dim_customer():
-        hook = PostgresHook(
-            postgres_conn_id=POSTGRES_CONN_ID
-        )
 
-        hook.run("""
-            -- 1. Close current records that have changed
-            UPDATE analytics.dim_customer AS dim
-            SET
-                valid_to = CURRENT_TIMESTAMP,
-                is_current = FALSE
-            FROM staging.customers AS src
-            WHERE dim.customer_id = src.customer_id
-            AND dim.is_current = TRUE
-            AND dim.record_hash <> md5(
-                    concat_ws(
-                        '||',
-                        src.first_name,
-                        src.last_name,
-                        src.email
-                    )
-            );
+    # @task(
+    #     retries=1,
+    #     retry_delay=timedelta(minutes=5),
+    #     execution_timeout=timedelta(hours=1),
+    # )
+    # def run_dbt_build():
+    #     """Build and test the complete dbt project."""
+    #     command = [
+    #         DBT_EXECUTABLE,
+    #         "build",
+    #         "--project-dir",
+    #         DBT_PROJECT_DIR,
+    #         "--profiles-dir",
+    #         DBT_PROFILES_DIR,
+    #         "--no-partial-parse",
+    #     ]
 
-            -- 2. Insert new customers and new versions
-            INSERT INTO analytics.dim_customer (
-                customer_id,
-                first_name,
-                last_name,
-                email,
-                record_hash,
-                valid_from,
-                valid_to,
-                is_current,
-                created_at
-            )
-            SELECT
-                src.customer_id,
-                src.first_name,
-                src.last_name,
-                src.email,
-                md5(
-                    concat_ws(
-                        '||',
-                        src.first_name,
-                        src.last_name,
-                        src.email
-                    )
-                ) AS record_hash,
-                CURRENT_TIMESTAMP AS valid_from,
-                NULL AS valid_to,
-                TRUE AS is_current,
-                CURRENT_TIMESTAMP AS created_at
-            FROM staging.customers AS src
-            LEFT JOIN analytics.dim_customer AS dim
-                ON dim.customer_id = src.customer_id
-            AND dim.is_current = TRUE
-            WHERE dim.customer_id IS NULL;
-            """
-        )
+    #     print("Running dbt command:", " ".join(command))
+    #     subprocess.run(command, check=True)
 
-    @task(retries=2)
-    def load_dim_product():
-        hook = PostgresHook(
-            postgres_conn_id=POSTGRES_CONN_ID
-        )
-        hook.run(
-            """
-            INSERT INTO analytics.dim_product (
-                product_id,
-                name,
-                category,
-                price,
-                created_at
-            )
-            SELECT
-                product_id,
-                name,
-                category,
-                price,
-                created_at
-            FROM staging.products
-
-            ON CONFLICT (product_id)
-            DO UPDATE SET
-                name = EXCLUDED.name,
-                category = EXCLUDED.category,
-                price = EXCLUDED.price,
-                created_at = EXCLUDED.created_at;
-            """
-        )
-
-    @task(retries=2)
-    def transform_fact_sales():
-        hook = PostgresHook(
-            postgres_conn_id=POSTGRES_CONN_ID
-        )
-        hook.run(
-            """
-            INSERT INTO analytics.fact_sales (
-                order_id,
-                order_item_id,
-                customer_id,
-                customer_sk,
-                product_id,
-                order_date,
-                quantity,
-                unit_price,
-                sales_amount,
-                payment_status
-            )
-            SELECT
-                o.order_id,
-                oi.order_item_id,
-                o.customer_id,
-                dc.customer_sk,
-                oi.product_id,
-                o.order_date,
-                oi.quantity,
-                oi.unit_price,
-
-                oi.quantity * oi.unit_price
-                    AS sales_amount,
-
-                COALESCE(
-                    p.payment_status,
-                    'unpaid'
-                ) AS payment_status
-
-            FROM staging.orders o
-
-            JOIN staging.order_items oi
-                ON oi.order_id = o.order_id
-
-            JOIN analytics.dim_customer dc
-                ON dc.customer_id = o.customer_id
-                AND dc.is_current = TRUE
-
-            JOIN staging.products pr
-                ON pr.product_id = oi.product_id
-
-            LEFT JOIN (
-                SELECT
-                    order_id,
-
-                    CASE
-                        WHEN BOOL_AND(
-                            payment_status = 'completed'
-                        )
-                            THEN 'paid'
-
-                        WHEN BOOL_OR(
-                            payment_status = 'completed'
-                        )
-                            THEN 'partially_paid'
-
-                        ELSE 'unpaid'
-                    END AS payment_status
-
-                FROM staging.payments
-
-                GROUP BY order_id
-            ) p
-                ON p.order_id = o.order_id
-
-            ON CONFLICT (
-                order_id,
-                order_item_id
-            )
-            DO UPDATE SET
-                customer_id = EXCLUDED.customer_id,
-                customer_sk = EXCLUDED.customer_sk,
-                product_id = EXCLUDED.product_id,
-                order_date = EXCLUDED.order_date,
-                quantity = EXCLUDED.quantity,
-                unit_price = EXCLUDED.unit_price,
-                sales_amount = EXCLUDED.sales_amount,
-                payment_status = EXCLUDED.payment_status;
-            """
-        )
-
-    @task(retries=2)
-    def load_daily_sales():
-        hook = PostgresHook(
-            postgres_conn_id=POSTGRES_CONN_ID
-        )
-
-        hook.run(
-            """
-            INSERT INTO analytics.daily_sales (
-                sales_date,
-                total_orders,
-                total_items,
-                total_sales,
-                paid_sales
-            )
-            SELECT
-                order_date::date AS sales_date,
-
-                COUNT(DISTINCT order_id)
-                    AS total_orders,
-
-                SUM(quantity)
-                    AS total_items,
-
-                SUM(sales_amount)
-                    AS total_sales,
-
-                SUM(
-                    CASE
-                        WHEN payment_status = 'paid'
-                            THEN sales_amount
-                        ELSE 0
-                    END
-                ) AS paid_sales
-
-            FROM analytics.fact_sales
-
-            GROUP BY order_date::date
-
-            ON CONFLICT (sales_date)
-            DO UPDATE SET
-                total_orders = EXCLUDED.total_orders,
-                total_items = EXCLUDED.total_items,
-                total_sales = EXCLUDED.total_sales,
-                paid_sales = EXCLUDED.paid_sales;
-            """
-        )
+    @task(
+        retries=1,
+        retry_delay=timedelta(minutes=5),
+        execution_timeout=timedelta(hours=1)
+    )
+    def run_dbt_transform():
+        """Build and test the complete dbt project"""
+        command = [DBT_EXECUTABLE,
+                "build",
+                "--project-dir",
+                DBT_PROJECT_DIR,
+                "--profiles-dir",
+                DBT_PROFILES_DIR,
+                "--no-partial-parse"
+        ]
+        print("Running dbt command: ", " ".join(command))
+        subprocess.run(command, check=True)
 
     @task(retries=2)
     def advance_watermarks(**context):
@@ -596,10 +411,7 @@ def ecommerce_pipeline():
     validated_record_count = validate_record_count()
     validated_relationships = validate_relationships()
 
-    dim_customer = load_dim_customer()
-    dim_product = load_dim_product()
-    fact_sale = transform_fact_sales()
-    daily_sales = load_daily_sales()
+    dbt_transform = run_dbt_transform()
     watermarks = advance_watermarks()
 
     run_config >> [
@@ -608,8 +420,6 @@ def ecommerce_pipeline():
         orders,
         order_items,
         payments,
-    ] >> validated_record_count >> validated_relationships >> [dim_customer, dim_product]
-    dim_customer >> fact_sale >> daily_sales
-    [daily_sales, dim_product] >> watermarks
+    ] >> validated_record_count >> validated_relationships >> dbt_transform >> watermarks
 
 ecommerce_pipeline()
