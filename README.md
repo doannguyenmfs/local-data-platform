@@ -49,4 +49,4 @@ airflow dags trigger ecommerce_pipeline \
 ```
 
 Both timestamps are required in backfill mode and `backfill_start` must be
-earlier than `backfill_end`.
+earlier than `backfill_end`!
