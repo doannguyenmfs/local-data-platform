@@ -37,6 +37,10 @@ x-airflow-common: &airflow-common
 
       DBT_PROJECT_DIR: /opt/airflow/dbt
       DBT_PROFILES_DIR: /opt/airflow/dbt
+      DBT_TARGET: ${DBT_TARGET:-dev}
+      DBT_DEV_SCHEMA: ${DBT_DEV_SCHEMA:-dbt_dev}
+      DBT_CI_SCHEMA: ${DBT_CI_SCHEMA:-dbt_ci}
+      DBT_PROD_SCHEMA: ${DBT_PROD_SCHEMA:-analytics}
 
       ECOMMERCE_POSTGRES_HOST: postgres
       ECOMMERCE_POSTGRES_HOST_PORT: ${ECOMMERCE_POSTGRES_PORT}

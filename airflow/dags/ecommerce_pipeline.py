@@ -10,6 +10,7 @@ POSTGRES_CONN_ID = "ecommerce_postgres"
 DBT_EXECUTABLE = "/opt/dbt-venv/bin/dbt"
 DBT_PROJECT_DIR = os.getenv("DBT_PROJECT_DIR", "/opt/airflow/dbt")
 DBT_PROFILES_DIR = os.getenv("DBT_PROFILES_DIR", "/opt/airflow/dbt")
+DBT_TARGET = os.getenv("DBT_TARGET", "dev")
 PIPELINE_NAMES = {
     "staging_customers",
     "staging_products",
@@ -321,26 +322,6 @@ def ecommerce_pipeline():
                 )
             )
 
-    # @task(
-    #     retries=1,
-    #     retry_delay=timedelta(minutes=5),
-    #     execution_timeout=timedelta(hours=1),
-    # )
-    # def run_dbt_build():
-    #     """Build and test the complete dbt project."""
-    #     command = [
-    #         DBT_EXECUTABLE,
-    #         "build",
-    #         "--project-dir",
-    #         DBT_PROJECT_DIR,
-    #         "--profiles-dir",
-    #         DBT_PROFILES_DIR,
-    #         "--no-partial-parse",
-    #     ]
-
-    #     print("Running dbt command:", " ".join(command))
-    #     subprocess.run(command, check=True)
-
     @task(
         retries=1,
         retry_delay=timedelta(minutes=5),
@@ -354,6 +335,8 @@ def ecommerce_pipeline():
                 DBT_PROJECT_DIR,
                 "--profiles-dir",
                 DBT_PROFILES_DIR,
+                "--target",
+                DBT_TARGET,
                 "--no-partial-parse"
         ]
         print("Running dbt command: ", " ".join(command))
