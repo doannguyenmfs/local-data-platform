@@ -1,13 +1,12 @@
 name: dbt CI
 
 on:
+  # Required check phải luôn được tạo cho mọi pull request vào main.
   pull_request:
-    paths:
-      - "dbt/**"
-      - "postgres/init/**"
-      - "postgres/ci/**"
-      - ".github/workflows/dbt-ci.yml"
+    branches:
+      - main
 
+  # Sau khi merge, chỉ chạy lại khi thành phần data platform thay đổi.
   push:
     branches:
       - main
