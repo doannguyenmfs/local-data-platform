@@ -7,8 +7,8 @@
 | **5** | **dbt ✅**                  | **modeling, tests, docs, lineage, incremental, CI**          |
 | **6** | **Spark ✅**                | **distributed batch processing**                |
 | **7** | **Iceberg ✅**              | **lakehouse/table format, ACID, snapshots**      |
-| **8** | **Kafka 📍**                | **streaming/event-driven architecture**         |
-| 9     | Production integration   | Airflow + dbt + Spark + Iceberg + Kafka         |
+| **8** | **Kafka ✅**                | **streaming, replay, checkpoint, DLQ**           |
+| **9** | **Production integration 📍** | **Airflow + dbt + Spark + Iceberg + Kafka**   |
 
 
 

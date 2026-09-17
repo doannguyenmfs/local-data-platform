@@ -88,6 +88,9 @@ x-spark-common: &spark-common
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-dataeng}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-dataeng_minio_password}
       AWS_REGION: us-east-1
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      KAFKA_ORDER_TOPIC: ecommerce.order-events.v1
+      SPARK_STREAM_CHECKPOINT: /opt/lakehouse/checkpoints/order-events-v1
     volumes:
       - lakehouse-data:/opt/lakehouse
 
@@ -372,6 +375,122 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+
+  # ==========================================================
+  # KAFKA EVENT STREAMING
+  # ==========================================================
+  kafka:
+    image: apache/kafka:4.3.1
+    container_name: local-data-platform-kafka
+    profiles: ["streaming"]
+    environment:
+      KAFKA_NODE_ID: 1
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: CONTROLLER://:9093,PLAINTEXT://:19092,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list >/dev/null 2>&1
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  kafka-init:
+    image: apache/kafka:4.3.1
+    profiles: ["streaming"]
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:19092 \
+          --create \
+          --if-not-exists \
+          --topic ecommerce.order-events.v1 \
+          --partitions 3 \
+          --replication-factor 1 \
+          --config retention.ms=604800000
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  order-producer:
+    build:
+      context: .
+      dockerfile: kafka/producer/Dockerfile
+    image: local-data-platform-order-producer:1.0.0
+    profiles: ["tools"]
+    environment:
+      ECOMMERCE_POSTGRES_HOST: postgres
+      ECOMMERCE_POSTGRES_PORT: ${ECOMMERCE_POSTGRES_PORT}
+      ECOMMERCE_POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
+      ECOMMERCE_POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
+      ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      KAFKA_ORDER_TOPIC: ecommerce.order-events.v1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+
+  order-stream:
+    <<: *spark-common
+    container_name: local-data-platform-order-stream
+    profiles: ["streaming"]
+    restart: unless-stopped
+    entrypoint: ["/opt/spark/bin/spark-submit"]
+    command:
+      - --master
+      - spark://spark-master:7077
+      - --deploy-mode
+      - client
+      - /opt/spark/jobs/order_stream.py
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      spark-master:
+        condition: service_started
+
+  order-stream-once:
+    <<: *spark-common
+    profiles: ["tools"]
+    entrypoint: ["/opt/spark/bin/spark-submit"]
+    command:
+      - --master
+      - spark://spark-master:7077
+      - --deploy-mode
+      - client
+      - /opt/spark/jobs/order_stream.py
+      - --available-now
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      spark-master:
+        condition: service_started
   # =============
   # AIRFLOW CONFUGURATION
   # =============
@@ -381,3 +500,4 @@ volumes:
   redis-data:
   lakehouse-data:
   minio-data:
+  kafka-data:
