@@ -5,9 +5,9 @@
 | 3     | Data Warehouse           | dimensions, SCD2, facts, marts                  |
 | **4** | **Incremental Pipeline ✅** | **watermark ✅, idempotency ✅, backfill ✅, late data ⏸ deferred** |
 | **5** | **dbt ✅**                  | **modeling, tests, docs, lineage, incremental, CI**          |
-| **6** | **Spark 📍**                | **distributed batch processing**                |
-| **7** | **Iceberg**              | **lakehouse/table format**                      |
-| **8** | **Kafka**                | **streaming/event-driven architecture**         |
+| **6** | **Spark ✅**                | **distributed batch processing**                |
+| **7** | **Iceberg ✅**              | **lakehouse/table format, ACID, snapshots**      |
+| **8** | **Kafka 📍**                | **streaming/event-driven architecture**         |
 | 9     | Production integration   | Airflow + dbt + Spark + Iceberg + Kafka         |
 
 
