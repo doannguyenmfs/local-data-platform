@@ -1,3 +1,5 @@
+-- Minimal deterministic fixture for dbt CI. Fixed UUIDs/timestamps make exact
+-- post-mutation assertions possible while keeping the workflow fast.
 BEGIN;
 
 INSERT INTO staging.customers (
@@ -139,6 +141,8 @@ INSERT INTO staging.payments (
     updated_at
 )
 VALUES
+    -- Order 1 is fully paid; order 2 has completed+failed attempts and begins as
+    -- partially_paid; order 3 has no payment and exercises the unpaid default.
     (
         '40000000-0000-0000-0000-000000000001',
         '20000000-0000-0000-0000-000000000001',

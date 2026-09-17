@@ -149,7 +149,7 @@ thành production deployment. Luôn truyền `--target` rõ ràng trong automati
 
 ## Tài liệu học và vận hành
 
-Đọc theo thứ tự:
+Đọc theo thứ tự, hoặc bắt đầu từ [mục lục theo vai trò](docs/learning/README.md):
 
 1. [Nền tảng data platform local](docs/learning/01-platform-foundations.md)
 2. [Airflow orchestration](docs/learning/02-airflow-orchestration.md)

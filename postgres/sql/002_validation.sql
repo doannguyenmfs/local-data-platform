@@ -1,4 +1,7 @@
--- check total amount mismatch
+-- Manual source control-total checks used after data generation. These do not
+-- replace automated dbt/Spark tests at downstream grains.
+
+-- Count exact order/item total mismatches.
 SELECT COUNT(*) AS mismatched_orders
 FROM orders o
 JOIN (
@@ -11,7 +14,7 @@ JOIN (
     ON o.order_id = oi.order_id
 WHERE o.total_amount <> oi.calculated_total;
 
--- validate orphan
+-- Count material amount differences with an explicit currency tolerance.
 SELECT COUNT(*)
 FROM orders o
 JOIN (
@@ -24,7 +27,7 @@ JOIN (
     ON o.order_id = oi.order_id
 WHERE ABS(o.total_amount - oi.calculated_total) > 0.01;
 
--- validate paymet distribution
+-- Inspect the distribution of one versus retry payment attempts.
 SELECT
     payment_count,
     COUNT(*) AS order_count

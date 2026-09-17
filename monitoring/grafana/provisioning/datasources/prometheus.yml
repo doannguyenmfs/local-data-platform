@@ -1,3 +1,5 @@
+# Provision a stable datasource UID so dashboard JSON never depends on a
+# manually created, environment-specific Grafana object.
 apiVersion: 1
 
 datasources:

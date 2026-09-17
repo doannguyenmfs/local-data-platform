@@ -1,3 +1,4 @@
+# Load dashboard JSON from a read-only Git-controlled directory at startup.
 apiVersion: 1
 
 providers:

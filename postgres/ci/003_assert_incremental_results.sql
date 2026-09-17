@@ -1,3 +1,5 @@
+-- Fail the CI transaction unless the mutation was applied incrementally without
+-- duplicate facts or a stale daily partition. psql injects dbt_schema safely.
 SET search_path TO :"dbt_schema";
 
 DO $$
@@ -8,6 +10,8 @@ DECLARE
     stale_jan_3_count BIGINT;
     jan_4_count BIGINT;
 BEGIN
+    -- These are control totals for the intentionally tiny fixture, not
+    -- production thresholds.
     SELECT COUNT(*) INTO fact_count
     FROM fact_sales;
 
