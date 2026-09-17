@@ -56,7 +56,7 @@ surrogate/range column hoặc các predicates không giao nhau.
 ```bash
 docker compose --profile spark up -d --build spark-master spark-worker
 
-docker compose run --rm spark-submit
+docker compose --profile '*' run --rm --no-deps spark-submit
 ```
 
 Spark master UI: <http://localhost:8081>  
@@ -65,7 +65,7 @@ Spark worker UI: <http://localhost:8082>
 Chạy unit test trong đúng Spark runtime:
 
 ```bash
-docker compose run --rm \
+docker compose --profile '*' run --rm --no-deps \
   --entrypoint /opt/spark/bin/spark-submit \
   spark-submit \
   --master 'local[2]' \

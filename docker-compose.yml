@@ -47,6 +47,9 @@ x-airflow-common: &airflow-common
       KAFKA_ORDER_TOPIC: ecommerce.order-events.v1
 
       ECOMMERCE_POSTGRES_HOST: postgres
+      ECOMMERCE_POSTGRES_PORT: ${ECOMMERCE_POSTGRES_PORT}
+      # dbt profiles also supports running from the host, where the published
+      # port may differ from PostgreSQL's container port.
       ECOMMERCE_POSTGRES_HOST_PORT: ${ECOMMERCE_POSTGRES_PORT}
       ECOMMERCE_POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
       ECOMMERCE_POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
@@ -280,7 +283,7 @@ services:
       - --cores
       - "2"
       - --memory
-      - 2g
+      - 3g
       - --webui-port
       - "8080"
     ports:
@@ -360,7 +363,7 @@ services:
   # LAKEHOUSE OBJECT STORAGE
   # ==========================================================
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: local-data-platform-minio
     profiles: ["lakehouse"]
     command: ["server", "/data", "--console-address", ":9001"]
@@ -379,7 +382,7 @@ services:
       retries: 12
 
   minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     profiles: ["lakehouse"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-dataeng}
@@ -484,6 +487,12 @@ services:
       - spark://spark-master:7077
       - --deploy-mode
       - client
+      - --conf
+      - spark.executor.cores=1
+      - --conf
+      - spark.cores.max=1
+      - --conf
+      - spark.executor.memory=1g
       - /opt/spark/jobs/order_stream.py
     depends_on:
       kafka-init:
@@ -502,6 +511,12 @@ services:
       - spark://spark-master:7077
       - --deploy-mode
       - client
+      - --conf
+      - spark.executor.cores=1
+      - --conf
+      - spark.cores.max=1
+      - --conf
+      - spark.executor.memory=1g
       - /opt/spark/jobs/order_stream.py
       - --available-now
     depends_on:

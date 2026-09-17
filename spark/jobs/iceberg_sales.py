@@ -46,7 +46,17 @@ def create_table(spark) -> None:
     )
 
 
-def merge_sales(spark, updates) -> None:
+def write_sales(spark, updates, table_is_empty: bool) -> str:
+    """Append the first snapshot, then use key-based MERGE for later deltas.
+
+    A MERGE against an empty table is semantically correct but needlessly
+    builds the full row-level rewrite plan.  The first load is append-only;
+    subsequent loads retain the idempotent MERGE contract.
+    """
+    if table_is_empty:
+        updates.repartition("sales_date").writeTo(TABLE_NAME).append()
+        return "append"
+
     updates.createOrReplaceTempView("sales_updates")
     spark.sql(
         f"""
@@ -60,6 +70,7 @@ def merge_sales(spark, updates) -> None:
           THEN INSERT *
         """
     )
+    return "merge"
 
 
 def validate_table(spark) -> dict[str, Any]:
@@ -96,6 +107,7 @@ def main() -> None:
     spark.sparkContext.setLogLevel("WARN")
     try:
         create_table(spark)
+        table_is_empty = spark.table(TABLE_NAME).limit(1).count() == 0
         current_high_watermark = (
             spark.table(TABLE_NAME).agg(F.max("source_loaded_at")).first()[0]
             or datetime(1900, 1, 1, tzinfo=timezone.utc)
@@ -106,11 +118,19 @@ def main() -> None:
             read_staging_table(spark, config, "payments"),
         ).filter(F.col("source_loaded_at") > F.lit(current_high_watermark)).persist()
         source_metrics = validate_sales(updates)
-        merge_sales(spark, updates)
+        operation = "no-op"
+        if source_metrics["row_count"]:
+            operation = write_sales(spark, updates, table_is_empty)
         table_metrics = validate_table(spark)
         print(
             "ICEBERG_JOB_METRICS="
-            + json.dumps({"source": source_metrics, "table": table_metrics})
+            + json.dumps(
+                {
+                    "operation": operation,
+                    "source": source_metrics,
+                    "table": table_metrics,
+                }
+            )
         )
     finally:
         spark.stop()

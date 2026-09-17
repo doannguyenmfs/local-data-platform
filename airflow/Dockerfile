@@ -10,7 +10,10 @@ RUN python -m  venv /opt/dbt-venv \
     && /opt/dbt-venv/bin/python -m pip install \
         --no-cache-dir \
         --requirement /tmp/dbt-requirements.txt \
-    && rm -f /tmp/dbt-requirements.txt \
+    && /opt/dbt-venv/bin/python -m pip install \
+        --no-cache-dir \
+        --requirement /tmp/kafka-requirements.txt \
+    && rm -f /tmp/dbt-requirements.txt /tmp/kafka-requirements.txt \
     && mkdir -p \
         /opt/airflow/dbt \
         /opt/airflow/dbt/logs \
@@ -24,7 +27,4 @@ RUN python -m  venv /opt/dbt-venv \
 ENV PATH="/opt/dbt-venv/bin:${PATH}"
 
 USER airflow
-RUN python -m pip install \
-        --no-cache-dir \
-        --requirement /tmp/kafka-requirements.txt \
-    && dbt --version
+RUN dbt --version

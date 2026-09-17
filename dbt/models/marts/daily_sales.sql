@@ -3,16 +3,25 @@
         materialized='incremental',
         incremental_strategy='merge',
         unique_key='sales_date',
-        on_schema_change='fail',
+        on_schema_change='sync_all_columns',
         post_hook=[
             "delete from {{ this }} as daily where not exists (select 1 from {{ ref('fact_sales') }} as fact where fact.order_date::date = daily.sales_date)"
         ]
-    )
+)
 }}
+
+{% set target_state = namespace(has_max_source_loaded_at=false) %}
+{% if is_incremental() %}
+    {% for column in adapter.get_columns_in_relation(this) %}
+        {% if column.name | lower == 'max_source_loaded_at' %}
+            {% set target_state.has_max_source_loaded_at = true %}
+        {% endif %}
+    {% endfor %}
+{% endif %}
 
 with affected_dates as (
 
-    {% if is_incremental() %}
+    {% if is_incremental() and target_state.has_max_source_loaded_at %}
 
     select order_date::date as sales_date
     from {{ ref('fact_sales') }}

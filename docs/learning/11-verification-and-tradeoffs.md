@@ -1,0 +1,87 @@
+# Level 11 — System verification và production trade-offs
+
+## Vì sao cần một bước verification riêng?
+
+Unit test chỉ chứng minh một hàm đúng với input nhỏ. Container `running` chỉ
+chứng minh process chưa thoát. Một data platform chỉ được coi là hoàn tất khi
+các ranh giới hệ thống cùng hoạt động: credentials, network, dependency order,
+retry, checkpoint, catalog, object storage và business grain.
+
+Project dùng bốn lớp bằng chứng:
+
+1. Static: Python compile, Compose render, Prometheus/Alertmanager config.
+2. Component: dbt tests và Spark transformation/parser unit tests.
+3. Data invariants: row count bằng distinct business key, no-op khi replay.
+4. End-to-end: một DAG thật hoàn tất và watermark chỉ commit ở task cuối.
+
+## Kết quả baseline đã xác minh ngày 2026-09-17
+
+| Kiểm tra | Kết quả |
+| --- | --- |
+| dbt build | 89/89 PASS, chạy liên tiếp hai lần |
+| dbt incremental replay | `fact_sales` và `daily_sales` đều `MERGE 0` |
+| Spark unit tests | batch transform PASS, event parser PASS |
+| Iceberg initial load | 1.499.586 fact rows, grain hợp lệ |
+| Iceberg replay | `operation=no-op`, snapshot không đổi |
+| Kafka replay | publish 10 event hai lần, `order_events` vẫn 10 key |
+| Current state | 10 rows = 10 distinct `order_id` |
+| DLQ | 0 record trong happy path |
+| Iceberg maintenance | compact 11 data files và 10 position-delete files |
+| Airflow | manual DAG success; 5 candidate watermarks trở về `NULL` |
+| Monitoring | 5 semantic components up; Prometheus rules và Grafana health PASS |
+
+Các số row là baseline của seed hiện tại, không phải constant để hard-code vào
+alert. Invariant quan trọng là grain, retry behavior và quan hệ giữa source với
+sink.
+
+## Những lỗi integration đã phát hiện và bài học
+
+### 1. Một executable không phải một chuỗi command
+
+`subprocess.run()` phải nhận list argument. Truyền cả command thành một string
+trong phần tử đầu khiến OS tìm một file có tên chứa toàn bộ flags. Airflow hiện
+dùng list rõ ràng cho dbt và producer.
+
+### 2. Python runtime phải sở hữu dependency của task
+
+Airflow task runner và `/opt/dbt-venv` là hai interpreter khác nhau. Kafka
+producer được gọi bằng Python của venv nơi `psycopg` và `confluent-kafka` đã
+được cài; không dựa vào `sys.executable` một cách ngẫu nhiên.
+
+### 3. Container port và published host port là hai khái niệm
+
+Producer kết nối `postgres:5432` qua Docker network; dbt chạy từ host có thể dùng
+published port khác. Compose truyền cả `ECOMMERCE_POSTGRES_PORT` và
+`ECOMMERCE_POSTGRES_HOST_PORT` để hai execution context không ghi đè ý nghĩa
+của nhau.
+
+### 4. First load không nên giả vờ là incremental merge
+
+MERGE vào bảng Iceberg rỗng đúng về logic nhưng tạo row-level plan tốn memory.
+Job fact dùng append cho snapshot đầu, sau đó mới MERGE; nếu không có delta thì
+không tạo snapshot mới.
+
+### 5. Streaming current state có write pattern khác event history
+
+`current_orders` bị upsert liên tục nên dùng merge-on-read; `order_events` là
+lịch sử logic và dedupe bằng event id. Đổi lại, merge-on-read tạo delete files,
+vì vậy weekly maintenance compact cả data files lẫn position-delete files.
+
+### 6. Retry phải được kiểm tra bằng failure thật
+
+Trong lần verification, task dbt từng vào `up_for_retry` vì thiếu env var. Sau
+khi sửa runtime config, Airflow tự retry thành công rồi mới chạy
+`advance_watermarks`. Đây là bằng chứng dependency/watermark barrier hoạt động,
+không chỉ là sơ đồ đúng trên giấy.
+
+## Production-shaped không đồng nghĩa production-ready
+
+Project thể hiện pattern đúng nhưng cố ý giữ footprint local. Để chạy dữ liệu
+thật cần ít nhất multi-node HA, TLS/SASL/RBAC, secret manager, remote backup,
+external alert receiver, capacity test, SLO và deployment strategy. Spark
+gateway allow-list là ranh giới an toàn cho lab; production thường thay bằng
+Spark Operator, Livy hoặc managed job API.
+
+Các lệnh verification chuẩn và failure recovery nằm trong
+[`docs/runbook.md`](../runbook.md). Không xóa volume/checkpoint để làm test xanh;
+hãy giữ state và chứng minh cơ chế retry/idempotency xử lý được nó.

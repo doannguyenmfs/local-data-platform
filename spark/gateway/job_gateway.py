@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 JOBS = {
     "iceberg-sales": ["/opt/spark/jobs/iceberg_sales.py"],
     "iceberg-maintenance": ["/opt/spark/jobs/maintain_iceberg.py"],
+    "validate-platform": ["/opt/spark/jobs/validate_platform.py"],
 }
 SPARK_SUBMIT = "/opt/spark/bin/spark-submit"
 SPARK_MASTER = "spark://spark-master:7077"
@@ -68,6 +69,12 @@ class JobGatewayHandler(BaseHTTPRequestHandler):
             "spark.driver.host=spark-gateway",
             "--conf",
             "spark.driver.bindAddress=0.0.0.0",
+            "--conf",
+            "spark.executor.cores=1",
+            "--conf",
+            "spark.cores.max=1",
+            "--conf",
+            "spark.executor.memory=2g",
             *job_args,
         ]
         try:

@@ -3,15 +3,29 @@
         materialized='incremental',
         incremental_strategy='merge',
         unique_key='order_item_id',
-        on_schema_change='fail',
+        on_schema_change='sync_all_columns',
         indexes=[
             {'columns': ['order_date']},
             {'columns': ['customer_sk']},
             {'columns': ['product_id']},
             {'columns': ['source_loaded_at']}
         ]
-    )
+)
 }}
+
+{#
+  A project upgrade can encounter a relation created before source_loaded_at
+  existed.  In that one migration run, read all rows and let dbt add the new
+  columns before MERGE.  Normal runs retain the high-water filter.
+#}
+{% set target_state = namespace(has_source_loaded_at=false) %}
+{% if is_incremental() %}
+    {% for column in adapter.get_columns_in_relation(this) %}
+        {% if column.name | lower == 'source_loaded_at' %}
+            {% set target_state.has_source_loaded_at = true %}
+        {% endif %}
+    {% endfor %}
+{% endif %}
 
 with sales_order_items as (
 
@@ -31,7 +45,7 @@ with sales_order_items as (
 
     from {{ ref('int_sales_order_items') }}
 
-    {% if is_incremental() %}
+    {% if is_incremental() and target_state.has_source_loaded_at %}
 
     where source_loaded_at > coalesce(
         (select max(source_loaded_at) from {{ this }}),

@@ -1,112 +1,66 @@
-| Level | Chủ đề                   | Mục tiêu                                        |
-| ----- | ------------------------ | ----------------------------------------------- |
-| 1     | Airflow fundamentals     | DAG/task/dependency                             |
-| 2     | Advanced orchestration   | parallelism, validation, retries                |
-| 3     | Data Warehouse           | dimensions, SCD2, facts, marts                  |
-| **4** | **Incremental Pipeline ✅** | **watermark ✅, idempotency ✅, backfill ✅, late data ⏸ deferred** |
-| **5** | **dbt ✅**                  | **modeling, tests, docs, lineage, incremental, CI**          |
-| **6** | **Spark ✅**                | **distributed batch processing**                |
-| **7** | **Iceberg ✅**              | **lakehouse/table format, ACID, snapshots**      |
-| **8** | **Kafka ✅**                | **streaming, replay, checkpoint, DLQ**           |
-| **9** | **Production integration 📍** | **Airflow + dbt + Spark + Iceberg + Kafka**   |
+# LOCAL DATA PLATFORM — ROADMAP
 
+Trạng thái: COMPLETE (local production-shaped learning platform)
+Xác minh end-to-end gần nhất: 2026-09-17
 
+| Level | Chủ đề | Kết quả |
+| --- | --- | --- |
+| 1 | Airflow fundamentals | DAG, task, dependency, schedule |
+| 2 | Advanced orchestration | parallel extraction, retry, validation |
+| 3 | Data warehouse | dimensions, SCD2 snapshot, facts, marts |
+| 4 | Incremental pipeline | watermark, idempotency, backfill |
+| 5 | dbt | staging/intermediate/marts, tests, docs, lineage, CI |
+| 6 | Spark | distributed batch transform và Parquet |
+| 7 | Iceberg | ACID merge, snapshots, time travel, maintenance |
+| 8 | Kafka | replayable events, checkpoint, current state, DLQ |
+| 9 | Production integration | Airflow điều phối dbt + Spark + Kafka |
+| 10 | Observability | semantic metrics, Prometheus, alerts, Grafana |
+| 11 | Delivery | container validation, GitHub Actions, runbook |
 
-                    LOCAL DATA PLATFORM
-                           │
-                           ▼
-                ┌─────────────────────┐
-                │ LEVEL 1             │
-                │ Airflow Fundamentals│
-                └──────────┬──────────┘
-                           │
-                           ▼
-                ┌─────────────────────┐
-                │ LEVEL 2             │
-                │ Orchestration       │
-                │ + Validation        │
-                │ + Parallelism       │
-                └──────────┬──────────┘
-                           │
-                           ▼
-                ┌─────────────────────┐
-                │ LEVEL 3             │
-                │ Data Warehouse      │
-                │ SCD2 + Fact         │
-                │ + Aggregation       │
-                └──────────┬──────────┘
-                           │
-                       ✅ COMPLETE
-                           │
-                           ▼
-                ┌─────────────────────┐
-                │ LEVEL 4             │
-                │ Incremental Data    │
-                │ Watermark           │
-                │ Idempotency         │
-                │ Backfill             │
-                │ Late Data: DEFERRED  │
-                └──────────┬──────────┘
-                           │
-                       ✅ COMPLETE
-                           │
-                           ▼
-                ┌─────────────────────┐
-                │ LEVEL 5             │
-                │ dbt                 │
-                │ Modeling            │
-                │ Tests               │
-                │ Documentation       │
-                │ Lineage             │
-                └──────────┬──────────┘
-                           │
-                       ✅ COMPLETE
-                           │
-                           ▼
-             ┌─────────────────────────────┐
-             │ LEVEL 6                    │
-             │ Spark                      │
-             │ Batch Processing           │
-             │ Distributed Computing      │
-             └─────────────┬───────────────┘
-                           │
-                    📍 WE ARE HERE
-                           │
-                           ▼
-             ┌─────────────────────────────┐
-             │ LEVEL 7                    │
-             │ Iceberg                    │
-             │ Data Lakehouse              │
-             │ ACID / Snapshot / TimeTravel│
-             └─────────────┬───────────────┘
-                           │
-                           ▼
-             ┌─────────────────────────────┐
-             │ LEVEL 8                    │
-             │ Kafka                      │
-             │ Streaming                  │
-             │ Event-driven Pipeline       │
-             └─────────────┬───────────────┘
-                           │
-                           ▼
-             ┌─────────────────────────────┐
-             │ PRODUCTION DE PLATFORM      │
-             │                             │
-             │ Airflow                     │
-             │ PostgreSQL                  │
-             │ dbt                         │
-             │ Spark                       │
-             │ Iceberg                     │
-             │ Kafka                       │
-             └─────────────────────────────┘
+## Luồng hoàn chỉnh
 
+```text
+extract -> validate -> [dbt, Iceberg batch, Kafka publish] -> advance watermark
+                                      Kafka -> Spark stream -> Iceberg
+weekly maintenance DAG -> compact files + expire old Iceberg snapshots
+all components -> exporter -> Prometheus -> Grafana / Alertmanager
+```
 
-DEFERRED / ACCEPTED RISK
-------------------------
-Late-arriving data is intentionally deferred because its expected frequency is
-currently very low. The accepted limitation is that a record arriving with an
-updated_at older than the committed watermark will not be picked up by the
-normal incremental run. Use an explicit backfill when such a case is detected.
-Revisit this decision when source latency becomes measurable or operationally
-significant; likely controls are a lookback window, ingestion timestamp, CDC,
-and late-data monitoring.
+## Definition of done
+
+- DAG daily và backfill có cửa sổ thời gian rõ ràng.
+- Retry extract/dbt/Iceberg/stream không làm nhân đôi business grain.
+- Watermark chỉ advance sau mọi downstream bắt buộc thành công.
+- dbt kiểm tra schema, grain, relationship, accepted values và SCD2 invariants.
+- Spark batch và parser streaming có unit test trong runtime image.
+- Iceberg giữ lịch sử snapshot và có maintenance job riêng.
+- Kafka topic cố định, producer có deterministic event ID, stream có checkpoint
+  và DLQ.
+- CI dựng môi trường tối thiểu, chạy test và build toàn bộ image.
+- Dashboard/alert theo dõi cả hạ tầng lẫn độ tươi dữ liệu.
+- README và runbook đủ để khởi động, kiểm tra và phục hồi mà không đọc source.
+
+## Deferred / accepted risks
+
+### Late-arriving source rows
+
+Record xuất hiện muộn nhưng có `updated_at` cũ hơn committed watermark sẽ không
+được scheduled incremental run chọn. Tần suất hiện được coi là rất thấp nên xử
+lý bằng explicit backfill. Khi có SLA thực, bổ sung ingestion timestamp hoặc CDC,
+lookback window có dedupe và metric đo source latency.
+
+### Local-only constraints
+
+- Single broker/worker/database/object-store: không có HA.
+- PLAINTEXT nội bộ, development credentials, không secret manager.
+- Alertmanager chưa có external receiver để tránh commit credential.
+- Không có off-host backup hoặc disaster-recovery drill.
+- Spark gateway là local adapter; production dùng Livy, Spark Operator hoặc
+  managed job API.
+
+## Hướng phát triển sau project
+
+Các mục sau không còn là điều kiện hoàn thành project học tập, nhưng là bước nâng
+cấp hợp lý: CDC bằng Debezium, schema registry/data contracts, OpenLineage, IaC
+và Kubernetes, object-store versioning/backup, HA, TLS/SASL/RBAC, cost/performance
+benchmark và SLO/error-budget.

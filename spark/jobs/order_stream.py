@@ -130,7 +130,24 @@ def create_tables(spark) -> None:
             latest_event_id STRING NOT NULL,
             updated_at TIMESTAMP
         ) USING iceberg
-        TBLPROPERTIES ('format-version' = '2')
+        TBLPROPERTIES (
+            'format-version' = '2',
+            'write.merge.mode' = 'merge-on-read',
+            'write.update.mode' = 'merge-on-read',
+            'write.delete.mode' = 'merge-on-read'
+        )
+        """
+    )
+    # CREATE TABLE IF NOT EXISTS does not update properties of an existing
+    # deployment. Keep this migration idempotent so older local volumes move
+    # to the streaming-friendly row-level write mode automatically.
+    spark.sql(
+        f"""
+        ALTER TABLE {CURRENT_ORDERS_TABLE} SET TBLPROPERTIES (
+            'write.merge.mode' = 'merge-on-read',
+            'write.update.mode' = 'merge-on-read',
+            'write.delete.mode' = 'merge-on-read'
+        )
         """
     )
     spark.sql(
@@ -196,15 +213,18 @@ def merge_batch(batch: DataFrame, batch_id: int) -> None:
                 "kafka_timestamp",
                 "ingested_at",
             )
-            event_updates.createOrReplaceTempView("order_event_updates")
-            spark.sql(
-                f"""
-                MERGE INTO {EVENTS_TABLE} AS target
-                USING order_event_updates AS source
-                  ON target.event_id = source.event_id
-                WHEN NOT MATCHED THEN INSERT *
-                """
-            )
+            if spark.table(EVENTS_TABLE).limit(1).count() == 0:
+                event_updates.writeTo(EVENTS_TABLE).append()
+            else:
+                event_updates.createOrReplaceTempView("order_event_updates")
+                spark.sql(
+                    f"""
+                    MERGE INTO {EVENTS_TABLE} AS target
+                    USING order_event_updates AS source
+                      ON target.event_id = source.event_id
+                    WHEN NOT MATCHED THEN INSERT *
+                    """
+                )
 
             latest_window = Window.partitionBy("order_id").orderBy(
                 F.col("source_updated_at").desc(),
@@ -224,18 +244,21 @@ def merge_batch(batch: DataFrame, batch_id: int) -> None:
                     F.col("ingested_at").alias("updated_at"),
                 )
             )
-            current_updates.createOrReplaceTempView("current_order_updates")
-            spark.sql(
-                f"""
-                MERGE INTO {CURRENT_ORDERS_TABLE} AS target
-                USING current_order_updates AS source
-                  ON target.order_id = source.order_id
-                WHEN MATCHED
-                  AND source.source_updated_at >= target.source_updated_at
-                  THEN UPDATE SET *
-                WHEN NOT MATCHED THEN INSERT *
-                """
-            )
+            if spark.table(CURRENT_ORDERS_TABLE).limit(1).count() == 0:
+                current_updates.writeTo(CURRENT_ORDERS_TABLE).append()
+            else:
+                current_updates.createOrReplaceTempView("current_order_updates")
+                spark.sql(
+                    f"""
+                    MERGE INTO {CURRENT_ORDERS_TABLE} AS target
+                    USING current_order_updates AS source
+                      ON target.order_id = source.order_id
+                    WHEN MATCHED
+                      AND source.source_updated_at >= target.source_updated_at
+                      THEN UPDATE SET *
+                    WHEN NOT MATCHED THEN INSERT *
+                    """
+                )
 
         if invalid.head(1):
             invalid_updates = invalid.select(
@@ -248,15 +271,18 @@ def merge_batch(batch: DataFrame, batch_id: int) -> None:
                 "kafka_timestamp",
                 "ingested_at",
             )
-            invalid_updates.createOrReplaceTempView("dead_letter_updates")
-            spark.sql(
-                f"""
-                MERGE INTO {DEAD_LETTER_TABLE} AS target
-                USING dead_letter_updates AS source
-                  ON target.dead_letter_id = source.dead_letter_id
-                WHEN NOT MATCHED THEN INSERT *
-                """
-            )
+            if spark.table(DEAD_LETTER_TABLE).limit(1).count() == 0:
+                invalid_updates.writeTo(DEAD_LETTER_TABLE).append()
+            else:
+                invalid_updates.createOrReplaceTempView("dead_letter_updates")
+                spark.sql(
+                    f"""
+                    MERGE INTO {DEAD_LETTER_TABLE} AS target
+                    USING dead_letter_updates AS source
+                      ON target.dead_letter_id = source.dead_letter_id
+                    WHEN NOT MATCHED THEN INSERT *
+                    """
+                )
         print(f"STREAM_BATCH_COMMITTED batch_id={batch_id}")
     finally:
         batch.unpersist()

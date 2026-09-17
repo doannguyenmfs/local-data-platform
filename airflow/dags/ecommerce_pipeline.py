@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 import os
 import subprocess
-import sys
 
 import requests
 from airflow.providers.postgres.hooks.postgres import PostgresHook
@@ -358,9 +357,13 @@ def ecommerce_pipeline():
             timeout=60 * 60,
         )
         if not response.ok:
+            try:
+                detail = response.json().get("log_tail", response.text)
+            except ValueError:
+                detail = response.text
             raise RuntimeError(
                 f"Spark gateway failed with HTTP {response.status_code}: "
-                f"{response.text[-4000:]}"
+                f"{detail[-12000:]}"
             )
         result = response.json()
         print(result.get("log_tail", ""))
@@ -374,7 +377,10 @@ def ecommerce_pipeline():
     )
     def publish_order_events(**context):
         """Publish replay-safe order events after staging validation passes."""
-        command = [sys.executable, ORDER_PRODUCER]
+        # The producer dependencies live in the same isolated runtime as dbt.
+        # Do not use sys.executable here: Airflow task runners use a different
+        # interpreter whose site-packages intentionally stay untouched.
+        command = ["/opt/dbt-venv/bin/python", ORDER_PRODUCER]
         params = context["params"]
         if params["run_mode"] == "backfill":
             command.extend(

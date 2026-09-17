@@ -52,6 +52,11 @@ def iceberg_spark(app_name: str) -> SparkSession:
         .config("spark.sql.catalog.local.s3.endpoint", os.environ["S3_ENDPOINT"])
         .config("spark.sql.catalog.local.s3.path-style-access", "true")
         .config("spark.sql.session.timeZone", "UTC")
+        # The local worker is deliberately small.  Keeping shuffle fan-out
+        # bounded avoids hundreds of tiny tasks and leaves enough heap for an
+        # Iceberg commit that touches a large initial snapshot.
+        .config("spark.sql.shuffle.partitions", "64")
+        .config("spark.default.parallelism", "64")
         .config("spark.sql.sources.partitionOverwriteMode", "dynamic")
         .getOrCreate()
     )

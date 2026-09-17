@@ -65,6 +65,13 @@ Ba bảng có ba mục đích:
 - `dead_letter_events`: payload không parse/không đúng schema, dedupe bằng
   `(topic, partition, offset)` đã hash.
 
+`current_orders` dùng Iceberg v2 `merge-on-read`: micro-batch ghi update/delete
+delta trước, còn weekly maintenance sẽ compact data/delete files sau. Cách này phù hợp bảng trạng
+thái bị upsert thường xuyên hơn `copy-on-write`, vốn phải rewrite data file ngay
+ở mỗi batch. `order_events` vẫn là lịch sử logic bất biến và `fact_sales` batch
+vẫn dùng copy-on-write. Lần nạp đầu vào bảng rỗng dùng append; từ lần sau mới
+MERGE để tránh dựng row-level plan không cần thiết.
+
 ## Chạy demo one-shot
 
 ```bash
@@ -106,6 +113,8 @@ docker compose \
 - Listener đang PLAINTEXT vì chỉ chạy local. Production cần TLS, SASL/ACL và
   không public broker trực tiếp.
 - Retention topic là 7 ngày, độc lập với retention Iceberg.
+- Merge-on-read giảm write amplification nhưng tạo delete files; maintenance
+  định kỳ không phải tùy chọn khi lưu lượng tăng.
 - `startingOffsets=earliest` chỉ áp dụng khi chưa có checkpoint. Sau đó checkpoint
   quyết định vị trí đọc.
 - Không xóa checkpoint để “chạy lại thử” trên cùng sink khi chưa hiểu hậu quả;
