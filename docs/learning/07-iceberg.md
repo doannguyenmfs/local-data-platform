@@ -49,8 +49,9 @@ mục Parquet.
 Hidden partitioning cho phép query filter `order_date`; người dùng không phải
 tự tạo và nhớ cột thư mục `year/month/day`. Iceberg dùng metadata để prune file.
 
-`source_loaded_at` ngăn update cũ ghi đè bản mới. Job vẫn đọc snapshot staging
-hiện tại, nhưng merge chỉ thay record khi source không cũ hơn target.
+`source_loaded_at` vừa lọc các staging row mới hơn high-water mark của Iceberg,
+vừa ngăn update cũ ghi đè bản mới. Retry sau một commit thành công có thể không
+có update nào và vẫn kết thúc an toàn.
 
 ## Chạy
 

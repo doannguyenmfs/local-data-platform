@@ -110,7 +110,8 @@ docker compose \
   quyết định vị trí đọc.
 - Không xóa checkpoint để “chạy lại thử” trên cùng sink khi chưa hiểu hậu quả;
   hãy dùng checkpoint path mới có chủ đích.
-- Producer demo quét staging để có thể replay. Production nên dùng transactional
+- Producer demo đọc đúng candidate watermark window của `staging_orders`; retry
+  đọc lại cùng window và sinh cùng event id. Production nên dùng transactional
   outbox hoặc CDC thay vì dual-write database + Kafka trong application.
 
 ## Câu hỏi phỏng vấn

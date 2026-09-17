@@ -42,6 +42,10 @@ x-airflow-common: &airflow-common
       DBT_CI_SCHEMA: ${DBT_CI_SCHEMA:-dbt_ci}
       DBT_PROD_SCHEMA: ${DBT_PROD_SCHEMA:-analytics}
 
+      SPARK_GATEWAY_URL: http://spark-gateway:8090
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      KAFKA_ORDER_TOPIC: ecommerce.order-events.v1
+
       ECOMMERCE_POSTGRES_HOST: postgres
       ECOMMERCE_POSTGRES_HOST_PORT: ${ECOMMERCE_POSTGRES_PORT}
       ECOMMERCE_POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
@@ -63,6 +67,7 @@ x-airflow-common: &airflow-common
       - ./dbt/snapshots:/opt/airflow/dbt/snapshots:ro
       - ./dbt/tests:/opt/airflow/dbt/tests:ro
       - ./dbt/docs:/opt/airflow/dbt/docs:ro
+      - ./kafka/producer:/opt/airflow/kafka-producer:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -91,6 +96,7 @@ x-spark-common: &spark-common
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
       KAFKA_ORDER_TOPIC: ecommerce.order-events.v1
       SPARK_STREAM_CHECKPOINT: /opt/lakehouse/checkpoints/order-events-v1
+      SPARK_NO_DAEMONIZE: "1"
     volumes:
       - lakehouse-data:/opt/lakehouse
 
@@ -248,9 +254,8 @@ services:
     <<: *spark-common
     container_name: local-data-platform-spark-master
     profiles: ["spark"]
-    entrypoint: ["/opt/spark/bin/spark-class"]
+    entrypoint: ["/opt/spark/sbin/start-master.sh"]
     command:
-      - org.apache.spark.deploy.master.Master
       - --host
       - spark-master
       - --port
@@ -258,7 +263,7 @@ services:
       - --webui-port
       - "8080"
     environment:
-      SPARK_DAEMON_JAVA_OPTS: -Dspark.master.rest.enabled=true
+      SPARK_NO_DAEMONIZE: "1"
     ports:
       - "7077:7077"
       - "8081:8080"
@@ -269,9 +274,8 @@ services:
     <<: *spark-common
     container_name: local-data-platform-spark-worker
     profiles: ["spark"]
-    entrypoint: ["/opt/spark/bin/spark-class"]
+    entrypoint: ["/opt/spark/sbin/start-worker.sh"]
     command:
-      - org.apache.spark.deploy.worker.Worker
       - spark://spark-master:7077
       - --cores
       - "2"
@@ -285,6 +289,22 @@ services:
       - lakehouse-data:/opt/lakehouse
     depends_on:
       - spark-master
+
+  spark-gateway:
+    <<: *spark-common
+    container_name: local-data-platform-spark-gateway
+    hostname: spark-gateway
+    profiles: ["spark"]
+    entrypoint: ["python3", "/opt/spark/gateway/job_gateway.py"]
+    ports:
+      - "8090:8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      spark-master:
+        condition: service_started
 
   spark-submit:
     <<: *spark-common

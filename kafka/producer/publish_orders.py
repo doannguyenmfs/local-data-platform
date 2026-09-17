@@ -30,6 +30,8 @@ def json_default(value: Any) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--start")
+    parser.add_argument("--end")
     return parser.parse_args()
 
 
@@ -60,22 +62,6 @@ def main() -> None:
         password=required("ECOMMERCE_POSTGRES_PASSWORD"),
         dbname=required("ECOMMERCE_POSTGRES_DB"),
     )
-    query = """
-        SELECT
-            order_id,
-            customer_id,
-            status,
-            total_amount,
-            order_date,
-            updated_at
-        FROM staging.orders
-        ORDER BY updated_at, order_id
-    """
-    parameters: tuple[Any, ...] = ()
-    if args.limit is not None:
-        query += " LIMIT %s"
-        parameters = (args.limit,)
-
     delivered = 0
     delivery_errors: list[str] = []
 
@@ -87,6 +73,46 @@ def main() -> None:
         delivered += 1
 
     with connection, connection.cursor() as cursor:
+        if (args.start is None) != (args.end is None):
+            raise ValueError("--start and --end must be supplied together")
+        if args.start is not None:
+            lower_bound = datetime.fromisoformat(args.start.replace("Z", "+00:00"))
+            upper_bound = datetime.fromisoformat(args.end.replace("Z", "+00:00"))
+            lower_operator = ">="
+            upper_operator = "<"
+        else:
+            cursor.execute(
+                """
+                SELECT watermark_value, candidate_value
+                FROM metadata.etl_watermark
+                WHERE pipeline_name = 'staging_orders'
+                """
+            )
+            bounds = cursor.fetchone()
+            if bounds is None or bounds[1] is None:
+                raise ValueError("Missing staging_orders candidate watermark")
+            lower_bound, upper_bound = bounds
+            lower_operator = ">"
+            upper_operator = "<="
+
+        query = f"""
+            SELECT
+                order_id,
+                customer_id,
+                status,
+                total_amount,
+                order_date,
+                updated_at
+            FROM staging.orders
+            WHERE updated_at {lower_operator} %s
+              AND updated_at {upper_operator} %s
+            ORDER BY updated_at, order_id
+        """
+        parameters: tuple[Any, ...] = (lower_bound, upper_bound)
+        if args.limit is not None:
+            query += " LIMIT %s"
+            parameters = (*parameters, args.limit)
+
         cursor.execute(query, parameters)
         columns = [column.name for column in cursor.description]
         for values in cursor:

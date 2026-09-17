@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
 import os
 import subprocess
+import sys
 
+import requests
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import Param, dag, task
 
@@ -11,6 +13,8 @@ DBT_EXECUTABLE = "/opt/dbt-venv/bin/dbt"
 DBT_PROJECT_DIR = os.getenv("DBT_PROJECT_DIR", "/opt/airflow/dbt")
 DBT_PROFILES_DIR = os.getenv("DBT_PROFILES_DIR", "/opt/airflow/dbt")
 DBT_TARGET = os.getenv("DBT_TARGET", "dev")
+SPARK_GATEWAY_URL = os.getenv("SPARK_GATEWAY_URL", "http://spark-gateway:8090")
+ORDER_PRODUCER = "/opt/airflow/kafka-producer/publish_orders.py"
 PIPELINE_NAMES = {
     "staging_customers",
     "staging_products",
@@ -342,6 +346,48 @@ def ecommerce_pipeline():
         print("Running dbt command: ", " ".join(command))
         subprocess.run(command, check=True)
 
+    @task(
+        retries=1,
+        retry_delay=timedelta(minutes=5),
+        execution_timeout=timedelta(hours=1),
+    )
+    def run_iceberg_batch():
+        """Submit the allow-listed PySpark Iceberg job to the Spark gateway."""
+        response = requests.post(
+            f"{SPARK_GATEWAY_URL}/jobs/iceberg-sales",
+            timeout=60 * 60,
+        )
+        if not response.ok:
+            raise RuntimeError(
+                f"Spark gateway failed with HTTP {response.status_code}: "
+                f"{response.text[-4000:]}"
+            )
+        result = response.json()
+        print(result.get("log_tail", ""))
+        if result.get("return_code") != 0:
+            raise RuntimeError(f"Spark job failed: {result}")
+
+    @task(
+        retries=2,
+        retry_delay=timedelta(minutes=2),
+        execution_timeout=timedelta(minutes=30),
+    )
+    def publish_order_events(**context):
+        """Publish replay-safe order events after staging validation passes."""
+        command = [sys.executable, ORDER_PRODUCER]
+        params = context["params"]
+        if params["run_mode"] == "backfill":
+            command.extend(
+                [
+                    "--start",
+                    params["backfill_start"],
+                    "--end",
+                    params["backfill_end"],
+                ]
+            )
+        print("Publishing order events with deterministic event ids")
+        subprocess.run(command, check=True)
+
     @task(retries=2)
     def advance_watermarks(**context):
         """Commit source windows only after all warehouse loads succeed."""
@@ -395,6 +441,8 @@ def ecommerce_pipeline():
     validated_relationships = validate_relationships()
 
     dbt_transform = run_dbt_transform()
+    iceberg_batch = run_iceberg_batch()
+    order_events = publish_order_events()
     watermarks = advance_watermarks()
 
     run_config >> [
@@ -403,6 +451,12 @@ def ecommerce_pipeline():
         orders,
         order_items,
         payments,
-    ] >> validated_record_count >> validated_relationships >> dbt_transform >> watermarks
+    ] >> validated_record_count >> validated_relationships
+
+    validated_relationships >> [
+        dbt_transform,
+        iceberg_batch,
+        order_events,
+    ] >> watermarks
 
 ecommerce_pipeline()

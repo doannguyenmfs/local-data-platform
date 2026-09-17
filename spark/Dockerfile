@@ -32,6 +32,7 @@ COPY --from=kafka-dependencies /kafka-jars/*.jar /opt/spark/jars/
 COPY --chown=185:0 spark/jobs /opt/spark/jobs
 COPY --chown=185:0 spark/tests /opt/spark/tests
 COPY --chown=185:0 spark/sql /opt/spark/sql
+COPY --chown=185:0 spark/gateway /opt/spark/gateway
 
 RUN mkdir -p /opt/lakehouse/parquet /opt/lakehouse/checkpoints \
     && chown -R 185:0 /opt/lakehouse

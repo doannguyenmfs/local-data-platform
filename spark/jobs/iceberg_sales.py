@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from pyspark.sql import functions as F
@@ -94,13 +95,17 @@ def main() -> None:
     spark = iceberg_spark("ecommerce-iceberg-sales")
     spark.sparkContext.setLogLevel("WARN")
     try:
+        create_table(spark)
+        current_high_watermark = (
+            spark.table(TABLE_NAME).agg(F.max("source_loaded_at")).first()[0]
+            or datetime(1900, 1, 1, tzinfo=timezone.utc)
+        )
         updates = transform_sales(
             read_staging_table(spark, config, "orders"),
             read_staging_table(spark, config, "order_items"),
             read_staging_table(spark, config, "payments"),
-        ).persist()
+        ).filter(F.col("source_loaded_at") > F.lit(current_high_watermark)).persist()
         source_metrics = validate_sales(updates)
-        create_table(spark)
         merge_sales(spark, updates)
         table_metrics = validate_table(spark)
         print(

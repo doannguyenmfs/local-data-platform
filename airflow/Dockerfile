@@ -2,6 +2,7 @@ FROM apache/airflow:3.3.0-python3.12
     
 USER root
 COPY dbt/requirements.txt /tmp/dbt-requirements.txt
+COPY --chown=airflow:0 kafka/producer/requirements.txt /tmp/kafka-requirements.txt
 RUN python -m  venv /opt/dbt-venv \
     && /opt/dbt-venv/bin/python -m pip install \
         --no-cache-dir \
@@ -23,4 +24,7 @@ RUN python -m  venv /opt/dbt-venv \
 ENV PATH="/opt/dbt-venv/bin:${PATH}"
 
 USER airflow
-RUN dbt --version
+RUN python -m pip install \
+        --no-cache-dir \
+        --requirement /tmp/kafka-requirements.txt \
+    && dbt --version
