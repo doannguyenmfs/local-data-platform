@@ -71,6 +71,21 @@ x-airflow-common: &airflow-common
       redis:
         condition: service_healthy
 
+x-spark-common: &spark-common
+    build:
+      context: .
+      dockerfile: spark/Dockerfile
+    image: local-data-platform-spark:3.5.9
+    environment:
+      ECOMMERCE_POSTGRES_HOST: postgres
+      ECOMMERCE_POSTGRES_PORT: ${ECOMMERCE_POSTGRES_PORT}
+      ECOMMERCE_POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
+      ECOMMERCE_POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
+      ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
+      SPARK_SALES_OUTPUT: /opt/lakehouse/parquet/sales
+    volumes:
+      - lakehouse-data:/opt/lakehouse
+
 services:
   # =============
   # SOURCE DATA BASE
@@ -217,6 +232,67 @@ services:
     depends_on:
       airflow-init:
         condition: service_completed_successfully
+
+  # ==========================================================
+  # SPARK STANDALONE CLUSTER
+  # ==========================================================
+  spark-master:
+    <<: *spark-common
+    container_name: local-data-platform-spark-master
+    profiles: ["spark"]
+    entrypoint: ["/opt/spark/bin/spark-class"]
+    command:
+      - org.apache.spark.deploy.master.Master
+      - --host
+      - spark-master
+      - --port
+      - "7077"
+      - --webui-port
+      - "8080"
+    environment:
+      SPARK_DAEMON_JAVA_OPTS: -Dspark.master.rest.enabled=true
+    ports:
+      - "7077:7077"
+      - "8081:8080"
+    volumes:
+      - lakehouse-data:/opt/lakehouse
+
+  spark-worker:
+    <<: *spark-common
+    container_name: local-data-platform-spark-worker
+    profiles: ["spark"]
+    entrypoint: ["/opt/spark/bin/spark-class"]
+    command:
+      - org.apache.spark.deploy.worker.Worker
+      - spark://spark-master:7077
+      - --cores
+      - "2"
+      - --memory
+      - 2g
+      - --webui-port
+      - "8080"
+    ports:
+      - "8082:8080"
+    volumes:
+      - lakehouse-data:/opt/lakehouse
+    depends_on:
+      - spark-master
+
+  spark-submit:
+    <<: *spark-common
+    profiles: ["tools"]
+    entrypoint: ["/opt/spark/bin/spark-submit"]
+    command:
+      - --master
+      - spark://spark-master:7077
+      - --deploy-mode
+      - client
+      - /opt/spark/jobs/sales_batch.py
+    depends_on:
+      postgres:
+        condition: service_healthy
+      spark-master:
+        condition: service_started
   # =============
   # AIRFLOW CONFUGURATION
   # =============
@@ -224,3 +300,4 @@ volumes:
   ecommerce-postgres-data:
   airflow-postgres-data:
   redis-data:
+  lakehouse-data:
