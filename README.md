@@ -30,7 +30,8 @@ Exporter ──► Prometheus ──► Grafana
 Topology chi tiết gồm 29 service definitions, 19 container chạy dài hạn, 4 init
 job, 6 one-shot tools, network/port/volume và lý do chọn số node được mô tả tại
 [Kiến trúc hệ thống](docs/architecture.md). Tra cứu trách nhiệm từng file tại
-[Bản đồ code](docs/code-map.md).
+[Bản đồ code](docs/code-map.md). Để xem theo góc độ người dùng/operator thay vì
+theo component, đọc [Platform có thể làm gì?](docs/platform-capabilities.md).
 
 Watermark chỉ được commit sau khi dbt, Iceberg và Kafka publication đều thành
 công. Vì không có distributed transaction xuyên ba hệ thống, mọi sink dùng
@@ -175,6 +176,7 @@ thành production deployment. Luôn truyền `--target` rõ ràng trong automati
 15. [Bản đồ code theo file](docs/code-map.md)
 16. [Runbook vận hành](docs/runbook.md)
 17. [Roadmap và phạm vi](ROADMAP.txt)
+18. [Functional capabilities và advanced roadmap](docs/platform-capabilities.md)
 
 ## Phạm vi production-shaped
 

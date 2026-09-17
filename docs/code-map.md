@@ -30,6 +30,7 @@ implementation nằm ở đâu.
 | --- | --- | --- |
 | `README.md` | quickstart và scope | không thay runbook/architecture deep dive |
 | `ROADMAP.txt` | trạng thái level và accepted risks | không phải task scheduler |
+| `docs/platform-capabilities.md` | chức năng hiện có + advanced backlog | góc nhìn capability, không thay code map |
 | `docker-compose.yml` | topology local executable | anchors tránh lặp Airflow/Spark config |
 | `.env.example` | contract cấu hình không bí mật | copy thành `.env`, không commit secret |
 | `requirements.txt` | dependency cho data generator/host tools | runtime container có requirements riêng |

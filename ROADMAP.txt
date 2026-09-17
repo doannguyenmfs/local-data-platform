@@ -21,6 +21,8 @@ Xác minh end-to-end gần nhất: 2026-09-17
 Tài liệu học tương ứng nằm trong `docs/learning/01-*.md` đến `12-*.md`.
 Topology logical/physical nằm tại `docs/architecture.md`; trách nhiệm từng file
 nằm tại `docs/code-map.md`; thao tác vận hành nằm tại `docs/runbook.md`.
+Danh sách capability hiện có và advanced backlog chi tiết nằm tại
+`docs/platform-capabilities.md`.
 
 ## Luồng hoàn chỉnh
 
@@ -79,7 +81,6 @@ có nghĩa delete đã materialize tới mọi downstream table.
 
 ## Hướng phát triển sau project
 
-Các bước nâng cấp tiếp theo: Schema Registry/data contracts, Bronze/Silver CDC
-materialization và cutover, event-time/late-data streaming, dbt model contracts
-và slim CI, OpenLineage/catalog, anomaly detection, performance benchmark,
-TLS/SASL/RBAC, backup/DR, IaC và Kubernetes.
+Advanced roadmap được ưu tiên và mô tả Definition of Done tại
+`docs/platform-capabilities.md`. Thứ tự gần nhất là Schema Registry/contracts,
+CDC Bronze/Silver/cutover, rồi external alerting/SLO, backup/DR và security.
