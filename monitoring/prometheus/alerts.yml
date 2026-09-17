@@ -1,0 +1,43 @@
+groups:
+  - name: local-data-platform
+    rules:
+      - alert: PlatformComponentDown
+        expr: platform_component_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.component }} is unavailable"
+          description: "Semantic health checks have failed for more than two minutes."
+
+      - alert: PipelineWatermarkStale
+        expr: pipeline_watermark_lag_seconds > 172800
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.pipeline }} watermark is more than 48 hours old"
+
+      - alert: PipelineCandidateStuck
+        expr: pipeline_candidate_pending == 1
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.pipeline }} candidate watermark has not committed"
+
+      - alert: RequiredKafkaTopicMissing
+        expr: kafka_topic_partitions < 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Required Kafka topic has no available partitions"
+
+      - alert: StagingTableEmpty
+        expr: staging_table_rows == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "staging.{{ $labels.table }} is empty"

@@ -511,6 +511,84 @@ services:
         condition: service_completed_successfully
       spark-master:
         condition: service_started
+
+  # ==========================================================
+  # OBSERVABILITY
+  # ==========================================================
+  platform-exporter:
+    build:
+      context: .
+      dockerfile: monitoring/Dockerfile
+    image: local-data-platform-exporter:1.0.0
+    container_name: local-data-platform-exporter
+    profiles: ["monitoring"]
+    environment:
+      ECOMMERCE_POSTGRES_HOST: postgres
+      ECOMMERCE_POSTGRES_PORT: ${ECOMMERCE_POSTGRES_PORT}
+      ECOMMERCE_POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
+      ECOMMERCE_POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
+      ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      KAFKA_ORDER_TOPIC: ecommerce.order-events.v1
+      SPARK_GATEWAY_HEALTH_URL: http://spark-gateway:8090/health
+      MINIO_HEALTH_URL: http://minio:9000/minio/health/live
+      AIRFLOW_HEALTH_URL: http://airflow-api-server:8080/api/v2/monitor/health
+      EXPORTER_PORT: 9100
+      COLLECTION_INTERVAL_SECONDS: 15
+    ports:
+      - "9100:9100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v3.13.3
+    container_name: local-data-platform-prometheus
+    profiles: ["monitoring"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - platform-exporter
+      - alertmanager
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.0
+    container_name: local-data-platform-alertmanager
+    profiles: ["monitoring"]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+
+  grafana:
+    image: grafana/grafana:13.2.1
+    container_name: local-data-platform-grafana
+    profiles: ["monitoring"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-dataeng_grafana_password}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
   # =============
   # AIRFLOW CONFUGURATION
   # =============
@@ -521,3 +599,6 @@ volumes:
   lakehouse-data:
   minio-data:
   kafka-data:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
