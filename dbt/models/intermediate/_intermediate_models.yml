@@ -29,6 +29,11 @@ models:
                   - partially_paid
                   - unpaid
 
+      - name: source_loaded_at
+        description: Latest staging load timestamp among payment attempts for the order.
+        data_tests:
+          - not_null
+
   - name: int_sales_order_items
     description: >
       Order-item-level sales data enriched with order and payment information.
@@ -80,3 +85,10 @@ models:
 
       - name: payment_attempt_count
         description: Number of payment attempts for the order; zero when absent.
+
+      - name: source_loaded_at
+        description: >
+          Latest staging load timestamp across the order, order item and
+          associated payment attempts. It drives downstream incremental loads.
+        data_tests:
+          - not_null

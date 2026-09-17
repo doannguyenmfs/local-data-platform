@@ -2,6 +2,7 @@
 select
     order_id,
     count(*) as payment_attempt_count,
+    max(loaded_at) as source_loaded_at,
     case
         when bool_and(payment_status = 'completed')
             then 'paid'

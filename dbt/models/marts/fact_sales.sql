@@ -1,4 +1,17 @@
-{{ config(materialized='table') }}
+{{
+    config(
+        materialized='incremental',
+        incremental_strategy='merge',
+        unique_key='order_item_id',
+        on_schema_change='fail',
+        indexes=[
+            {'columns': ['order_date']},
+            {'columns': ['customer_sk']},
+            {'columns': ['product_id']},
+            {'columns': ['source_loaded_at']}
+        ]
+    )
+}}
 
 with sales_order_items as (
 
@@ -13,9 +26,19 @@ with sales_order_items as (
         unit_price,
         sales_amount,
         payment_status,
-        payment_attempt_count
+        payment_attempt_count,
+        source_loaded_at
 
     from {{ ref('int_sales_order_items') }}
+
+    {% if is_incremental() %}
+
+    where source_loaded_at > coalesce(
+        (select max(source_loaded_at) from {{ this }}),
+        '1900-01-01 00:00:00+00'::timestamptz
+    )
+
+    {% endif %}
 
 ),
 
@@ -55,9 +78,23 @@ earliest_customer_versions as (
 
     where version_number = 1
 
-),
+)
 
-resolved_sales as (
+{% if is_incremental() %}
+
+, existing_facts as (
+
+    select
+        order_item_id,
+        order_date
+
+    from {{ this }}
+
+)
+
+{% endif %}
+
+, resolved_sales as (
 
     select
         sales.order_id,
@@ -69,12 +106,27 @@ resolved_sales as (
         ) as customer_sk,
         sales.product_id,
         sales.order_date,
+
+        {% if is_incremental() %}
+
+        case
+            when existing_facts.order_date is distinct from sales.order_date
+                then existing_facts.order_date
+        end as previous_order_date,
+
+        {% else %}
+
+        null::timestamptz as previous_order_date,
+
+        {% endif %}
+
         sales.order_status,
         sales.quantity,
         sales.unit_price,
         sales.sales_amount,
         sales.payment_status,
         sales.payment_attempt_count,
+        sales.source_loaded_at,
         case
             when matching_customer_version.customer_sk is not null
                 then 'as_of'
@@ -98,6 +150,13 @@ resolved_sales as (
         and matching_customer_version.customer_sk is null
         and sales.order_date < earliest_customer_version.valid_from
 
+    {% if is_incremental() %}
+
+    left join existing_facts
+        on sales.order_item_id = existing_facts.order_item_id
+
+    {% endif %}
+
 )
 
 select
@@ -107,12 +166,14 @@ select
     customer_id,
     product_id,
     order_date,
+    previous_order_date,
     order_status,
     quantity,
     unit_price,
     sales_amount,
     payment_status,
     payment_attempt_count,
+    source_loaded_at,
     customer_key_resolution
 
 from resolved_sales

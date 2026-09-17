@@ -4,8 +4,8 @@
 | 2     | Advanced orchestration   | parallelism, validation, retries                |
 | 3     | Data Warehouse           | dimensions, SCD2, facts, marts                  |
 | **4** | **Incremental Pipeline ✅** | **watermark ✅, idempotency ✅, backfill ✅, late data ⏸ deferred** |
-| **5** | **dbt 📍**                  | **modeling, tests, documentation, lineage**                  |
-| **6** | **Spark**                | **distributed batch processing**                |
+| **5** | **dbt ✅**                  | **modeling, tests, docs, lineage, incremental, CI**          |
+| **6** | **Spark 📍**                | **distributed batch processing**                |
 | **7** | **Iceberg**              | **lakehouse/table format**                      |
 | **8** | **Kafka**                | **streaming/event-driven architecture**         |
 | 9     | Production integration   | Airflow + dbt + Spark + Iceberg + Kafka         |
@@ -48,7 +48,7 @@
                 │ Late Data: DEFERRED  │
                 └──────────┬──────────┘
                            │
-                    📍 WE ARE HERE
+                       ✅ COMPLETE
                            │
                            ▼
                 ┌─────────────────────┐
@@ -60,6 +60,8 @@
                 │ Lineage             │
                 └──────────┬──────────┘
                            │
+                       ✅ COMPLETE
+                           │
                            ▼
              ┌─────────────────────────────┐
              │ LEVEL 6                    │
@@ -67,6 +69,8 @@
              │ Batch Processing           │
              │ Distributed Computing      │
              └─────────────┬───────────────┘
+                           │
+                    📍 WE ARE HERE
                            │
                            ▼
              ┌─────────────────────────────┐
