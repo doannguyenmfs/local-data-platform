@@ -7,6 +7,11 @@ commit succeeds but checkpoint progress has not yet been persisted.
 
 The module keeps parsing as a separate DataFrame transformation so its schema
 contract can be unit-tested without starting Kafka or MinIO.
+
+Beginner map: Kafka offsets identify input positions, the checkpoint remembers
+completed positions, and Iceberg MERGE makes replay safe if a table commit wins
+but checkpoint persistence loses the crash race.  Event history, current state
+and DLQ are three different views of the same micro-batch, not three consumers.
 """
 
 from __future__ import annotations
@@ -198,6 +203,12 @@ def merge_batch(batch: DataFrame, batch_id: int) -> None:
     offset range after a crash.  All writes therefore converge to the same
     final state instead of relying on exactly-once invocation.
     """
+    # Processing order below is intentionally explicit:
+    # 1. split valid/invalid records;
+    # 2. apply valid rows to immutable logical history;
+    # 3. choose the latest version per order and apply current state;
+    # 4. persist invalid rows in DLQ;
+    # 5. only after this function returns may Spark advance the checkpoint.
     if not batch.head(1):
         return
     # The same parsed rows feed up to three actions/sinks; persist avoids

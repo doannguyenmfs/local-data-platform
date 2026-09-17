@@ -47,7 +47,8 @@ chờ full-scale test.
 | DLQ | 0 record trong happy path |
 | Iceberg maintenance | compact 11 data files và 10 position-delete files |
 | Airflow | manual DAG success; 5 candidate watermarks trở về `NULL` |
-| Monitoring | 5 semantic components up; Prometheus rules và Grafana health PASS |
+| Monitoring | 6 semantic component checks; 8 Prometheus rules; Alertmanager/Grafana health PASS |
+| CDC | connector/task RUNNING; bootstrap chạy lại an toàn; smoke test thấy `c,u,d,tombstone` |
 
 Các số row là baseline của seed hiện tại, không phải constant để hard-code vào
 alert. Invariant quan trọng là grain, retry behavior và quan hệ giữa source với
@@ -119,6 +120,38 @@ external alert receiver, capacity test, SLO và deployment strategy. Spark
 gateway allow-list là ranh giới an toàn cho lab; production thường thay bằng
 Spark Operator, Livy hoặc managed job API.
 
+### Đánh giá theo từng năng lực production
+
+| Năng lực | Project hiện có | Phần còn thiếu để production |
+| --- | --- | --- |
+| Data correctness | grain, relationship, accepted-value, reconciliation, SCD2 invariant, replay test | contract enforcement ở mọi boundary, anomaly/control total theo dataset critical |
+| Incremental/retry | candidate watermark, MERGE, deterministic event ID, checkpoint, no-op replay | concurrency fencing cho nhiều DAG run/writer và recovery drill định kỳ |
+| CDC | WAL, least-privilege role, publication allow-list, durable slot/offset, delete capture | Bronze/Silver consumer, dedupe/apply delete, reconciliation và ownership cutover |
+| Availability | restart policy, healthcheck, durable local volume | PostgreSQL/Kafka/MinIO/Airflow/Connect HA trên failure domain khác nhau |
+| Security | non-root image khi phù hợp, separate replication role, env-based config | TLS, Kafka SASL/ACL, database RBAC chi tiết, network policy, secret manager/rotation |
+| Observability | exporter, Prometheus, 8 alert rules, Grafana, Alertmanager local, runbook | external receiver, on-call/escalation, centralized logs/traces, SLO/error budget |
+| Backup/DR | state/volume và recovery boundary được ghi tài liệu | off-host backup, PostgreSQL PITR, Kafka/object-store strategy, automated restore test, RPO/RTO |
+| Delivery | GitHub Actions kiểm tra dbt/Python/Compose/images/config | CD, immutable artifact registry/signing, IaC, migration/rollback và environment promotion |
+| Scale/cost | resource limits, partitioning, incremental/no-op, maintenance | load/soak/chaos test, capacity model, autoscaling, cost dashboard và tuning bằng workload thật |
+| Governance | docs, lineage qua `ref/source`, raw audit coordinates | catalog/OpenLineage, ownership, PII classification/masking, retention/deletion policy, audit access |
+
+Kết luận chính xác là: project đã **production-shaped** vì đã có boundary,
+state, retry, quality gate và failure mode thật. Nó chưa **production-ready** vì
+vẫn là topology một máy, một node, credential local và chưa có quy trình tổ chức
+như on-call, DR, security governance và deployment promotion.
+
+### Ưu tiên nâng cấp, không phải danh sách mua thêm công nghệ
+
+1. Hoàn thiện data contract: Schema Registry và compatibility gate.
+2. Materialize CDC vào Bronze/Silver, đối soát rồi cut over customer ownership.
+3. Thêm external alert receiver, owner/runbook URL và SLO cho pipeline critical.
+4. Backup off-host + restore drill; định nghĩa RPO/RTO trước khi nói HA.
+5. TLS/SASL/RBAC, secret manager và network segmentation.
+6. Load/soak/failure test rồi mới quyết định scale node/partition/resource.
+
+Thứ tự này ưu tiên tính đúng và khả năng phục hồi trước việc làm topology trông
+“to” hơn.
+
 ## Release checklist của project
 
 1. `git diff --check` và Python compile.
@@ -137,6 +170,10 @@ Không phải khi thêm nhiều logo. Cần evidence cho availability, security,
 recoverability và operability: multi-node failure test, TLS/RBAC, secret
 rotation, off-host backup restore, capacity benchmark, SLO/error budget,
 schema/data contract ownership và deploy/rollback procedure.
+
+Không có một checkbox biến project thành production-ready. Mỗi workload cần SLA,
+RPO/RTO, data sensitivity và lưu lượng cụ thể; readiness phải được chứng minh
+bằng test/failure drill tương ứng, không chỉ bằng việc file cấu hình tồn tại.
 
 Các lệnh verification chuẩn và failure recovery nằm trong
 [`docs/runbook.md`](../runbook.md). Không xóa volume/checkpoint để làm test xanh;

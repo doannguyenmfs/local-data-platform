@@ -4,6 +4,10 @@ The exporter intentionally survives dependency failures.  A monitoring process
 that exits whenever Kafka/PostgreSQL is down cannot report *which* dependency
 failed.  Each collector therefore converts its own exception into component
 and collection-error gauges while the HTTP metrics endpoint stays available.
+
+Beginner map: collectors READ system state; Gauges translate it into numbers;
+Prometheus SCRAPES those numbers and evaluates alert rules.  This process never
+repairs a pipeline or sends notifications itself.
 """
 
 from __future__ import annotations
@@ -184,6 +188,9 @@ def collect_kafka() -> None:
 
 def collect_debezium() -> None:
     """Check connector/task state, not merely the Kafka Connect HTTP port."""
+    # HTTP 200 from the worker only proves the worker process answers. A source
+    # task can still be FAILED, so health requires connector + every task to be
+    # RUNNING. WAL retention is checked separately in collect_postgres().
     connector = env("CDC_CONNECTOR_NAME", "ecommerce-postgres-cdc")
     base_url = env("DEBEZIUM_CONNECT_URL", "http://debezium-connect:8083")
     try:

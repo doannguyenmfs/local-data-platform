@@ -1,6 +1,6 @@
 # LOCAL DATA PLATFORM — ROADMAP
 
-Trạng thái: ADVANCED IN PROGRESS (core complete; CDC complete)
+Trạng thái: ADVANCED IN PROGRESS (core complete; CDC capture complete)
 Xác minh end-to-end gần nhất: 2026-09-17
 
 | Level | Chủ đề | Kết quả |
@@ -16,7 +16,7 @@ Xác minh end-to-end gần nhất: 2026-09-17
 | 9 | Production integration | Airflow điều phối dbt + Spark + Kafka |
 | 10 | Observability | semantic metrics, Prometheus, alerts, Grafana |
 | 11 | Delivery | container validation, GitHub Actions, runbook |
-| 12 | CDC | PostgreSQL WAL, Debezium, slot/publication, c/u/d/tombstone |
+| 12 | CDC capture | PostgreSQL WAL, Debezium, slot/publication, c/u/d/tombstone |
 
 Tài liệu học tương ứng nằm trong `docs/learning/01-*.md` đến `12-*.md`.
 Topology logical/physical nằm tại `docs/architecture.md`; trách nhiệm từng file
@@ -58,12 +58,15 @@ lý bằng explicit backfill. CDC hiện capture mọi commit mới của custom
 phụ thuộc `updated_at`; các table batch còn lại vẫn cần ingestion timestamp,
 lookback window có dedupe hoặc mở rộng publication sau capacity review.
 
-### CDC cutover chưa thực hiện
+### CDC materialization/cutover chưa thực hiện
 
 Hard delete customer đã có trong raw Kafka CDC topic nhưng chưa được áp vào
 `staging.customers`. Batch extractor vẫn là single writer của staging. Bước
 Bronze/Silver sẽ consume envelope, reconcile và cut over source ownership trước
 khi retire customer watermark; không chạy hai writer âm thầm trên cùng table.
+
+Vì vậy “Level 12 complete” nghĩa là capture/store/resume/observe đã xong, không
+có nghĩa delete đã materialize tới mọi downstream table.
 
 ### Local-only constraints
 

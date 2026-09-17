@@ -170,10 +170,11 @@ thành production deployment. Luôn truyền `--target` rõ ràng trong automati
 10. [Monitoring và alerting](docs/learning/10-observability.md)
 11. [System verification và production trade-offs](docs/learning/11-verification-and-tradeoffs.md)
 12. [CDC với PostgreSQL và Debezium](docs/learning/12-cdc-debezium.md)
-13. [Kiến trúc logical và physical](docs/architecture.md)
-14. [Bản đồ code theo file](docs/code-map.md)
-15. [Runbook vận hành](docs/runbook.md)
-16. [Roadmap và phạm vi](ROADMAP.txt)
+13. [Bản đồ nhập môn từ dbt incremental đến CDC](docs/learning/00-beginner-map.md)
+14. [Kiến trúc logical và physical](docs/architecture.md)
+15. [Bản đồ code theo file](docs/code-map.md)
+16. [Runbook vận hành](docs/runbook.md)
+17. [Roadmap và phạm vi](ROADMAP.txt)
 
 ## Phạm vi production-shaped
 
@@ -182,3 +183,7 @@ quan sát, nhưng vẫn là local lab: mỗi dịch vụ chỉ có một node, g
 chưa TLS/SASL, secret nằm trong `.env`, Alertmanager chưa gửi ra Slack/email và
 chưa có backup off-host. Spark worker cần 3 GB riêng; toàn stack nên được cấp ít
 nhất khoảng 8 GB Docker RAM. Không triển khai nguyên trạng này cho dữ liệu thật.
+
+Checklist “đã có / local-only / còn thiếu” theo correctness, HA, security,
+observability, DR, delivery, scale và governance nằm trong
+[System verification và production trade-offs](docs/learning/11-verification-and-tradeoffs.md).

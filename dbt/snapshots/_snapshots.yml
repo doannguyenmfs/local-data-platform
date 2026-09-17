@@ -8,6 +8,10 @@ snapshots:
       Grain: one row per customer version.
     relation: ref('stg_customers')
     config:
+      # BEGINNER MAP:
+      # - unique_key says which source rows belong to the same customer.
+      # - check_cols says which attribute changes create a new version.
+      # - dbt generates dbt_scd_id/valid_from/valid_to/updated_at metadata.
       # customer_id identifies the entity; dbt_scd_id identifies each version.
       schema: snapshots
       unique_key: customer_id
@@ -20,6 +24,8 @@ snapshots:
         - last_name
         - email
       updated_at: updated_at
+      # updated_at supplies the effective timestamp for generated validity
+      # metadata. It is not the version key and does not replace unique_key.
     columns:
       - name: dbt_scd_id
         description: >

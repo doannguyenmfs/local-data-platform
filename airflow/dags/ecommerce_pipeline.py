@@ -7,6 +7,11 @@ dbt/Spark, while durable data stays in PostgreSQL, Kafka and Iceberg.
 Importing the module must remain side-effect free.  Airflow's DAG processor
 imports it repeatedly, so database/network work belongs inside ``@task``
 functions, never at module scope.
+
+Beginner mental model: extract tasks prepare candidate state; validation proves
+the batch is usable; dbt/Iceberg/Kafka may commit independently; only the final
+task promotes every candidate to the committed watermark.  A retry therefore
+moves forward with idempotent sinks instead of trying to roll back three systems.
 """
 
 from datetime import datetime, timedelta
@@ -54,6 +59,10 @@ def extract_incremental(
     DAG code below, not supplied by users, which is why identifiers can be
     interpolated while all timestamp values remain bound SQL parameters.
     """
+    # Think of watermark_value as "safe for all downstream consumers" and
+    # candidate_value as "copied to staging, but the run is not finished".
+    # They must not be collapsed into one timestamp: doing so would skip data
+    # after a downstream failure.
     hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
     pipeline_name = f"staging_{table_name}"
 

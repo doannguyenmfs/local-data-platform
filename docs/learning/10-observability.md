@@ -6,11 +6,13 @@ Log mô tả từng event chi tiết; metric là số đo theo thời gian để
 và tạo alert. Một task “success” không chứng minh dữ liệu còn tươi: DAG có thể
 không được schedule, watermark đứng yên nhưng không có exception mới.
 
-Project theo dõi hai lớp:
+Project theo dõi ba lớp:
 
 - Infrastructure reachability: PostgreSQL, Kafka, Spark gateway, MinIO, Airflow.
 - Data/pipeline semantics: watermark lag, candidate bị treo, staging row counts,
   required Kafka topic/partition.
+- CDC safety: connector và task có thực sự `RUNNING`, replication slot có active,
+  và slot đang giữ lại bao nhiêu WAL.
 
 ## Kiến trúc
 
@@ -45,6 +47,9 @@ crash chỉ vì dependency nó đang quan sát bị down.
 | `pipeline_candidate_pending` | Batch đã extract nhưng chưa commit hết downstream |
 | `staging_table_rows` | Guardrail volume cơ bản |
 | `kafka_topic_partitions` | Required topic tồn tại và có partition |
+| `cdc_connector_up` | Connector và toàn bộ Debezium task đều `RUNNING` |
+| `cdc_replication_slot_active` | PostgreSQL logical slot đang được connector sử dụng |
+| `cdc_replication_slot_retained_bytes` | WAL bytes PostgreSQL chưa được phép dọn vì slot |
 | `platform_exporter_collection_errors` | Exporter không thu được subsystem metric |
 
 High-cardinality label như `order_id`, `customer_id`, `event_id` tuyệt đối không
@@ -65,6 +70,9 @@ lab. Data correctness chi tiết thuộc dbt/Spark test.
 - Watermark cũ hơn 48 giờ: warning.
 - Candidate giữ quá 1 giờ: critical; downstream có thể đang lỗi trước commit.
 - Required Kafka topic không có partition: critical.
+- Debezium connector/task không RUNNING 5 phút: critical.
+- CDC slot inactive 10 phút: warning.
+- CDC slot giữ trên 512 MiB WAL trong 10 phút: warning, trước safety cap 1 GiB.
 - Staging table rỗng 10 phút: warning.
 
 `for` duration chống alert flapping do restart ngắn. Threshold phải dựa trên SLA;
@@ -86,6 +94,19 @@ không phải retry của pipeline.
 Alertmanager local chỉ group và hiển thị alert trên UI, không gửi ra bên ngoài vì
 repository không chứa Slack/email credential. Production thêm receiver bằng
 secret manager; không commit webhook token.
+
+## Vậy project đã có monitoring/alert chưa?
+
+**Có**, nhưng cần phân biệt bốn tầng:
+
+1. Exporter đã đọc state thật và xuất metric.
+2. Prometheus đã scrape metric và có tám alert rules.
+3. Grafana đã có dashboard được provision từ Git.
+4. Alertmanager đã nhận/group alert, nhưng receiver hiện chỉ là `local-ui`.
+
+Tầng 1–3 và logic tầng 4 đã có. Phần chưa production là notification tới
+Slack/email/PagerDuty, on-call ownership, escalation policy, SLO/error budget và
+monitoring nằm ngoài cùng failure domain với workload.
 
 ## Chạy
 
@@ -136,6 +157,7 @@ write và monitoring nằm ngoài workload được quan sát.
 - `monitoring/prometheus/alerts.yml`: expression, threshold, duration, severity.
 - `monitoring/alertmanager/alertmanager.yml`: grouping/routing local.
 - `monitoring/grafana/provisioning/`: declarative datasource/dashboard loading.
+- `docs/runbook.md`: hành động operator khi từng alert xảy ra.
 
 ## Điều kiện hoàn thành
 

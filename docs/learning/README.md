@@ -10,6 +10,11 @@ thoại. Mỗi bài đi theo cùng một trình tự:
 5. cách kiểm tra kết quả;
 6. trade-off, lỗi thường gặp và câu hỏi phỏng vấn.
 
+Nếu bắt đầu mất dấu từ phần dbt incremental, hãy đọc
+[Bản đồ nhập môn từ dbt đến CDC](00-beginner-map.md) trước. Bài này nối các tool
+bằng bốn câu hỏi về input, state, retry và ý nghĩa của success; đồng thời phân
+biệt rõ delete mới được **capture** hay đã được **apply**.
+
 ## Đường học đầy đủ
 
 | Level | Bài | Sau bài này cần trả lời được |
@@ -26,6 +31,9 @@ thoại. Mỗi bài đi theo cùng một trình tự:
 | 10 | [Observability](10-observability.md) | health, freshness, metric, alert và data test khác nhau thế nào? |
 | 11 | [Verification](11-verification-and-tradeoffs.md) | bằng chứng nào đủ để tin một platform end-to-end? |
 | 12 | [CDC/Debezium](12-cdc-debezium.md) | WAL, LSN, publication, slot, snapshot và delete event phối hợp thế nào? |
+
+`00-beginner-map.md` không phải một level mới. Nó là bản đồ để tra cứu trong lúc
+đọc Level 5–12.
 
 Đọc [Kiến trúc hệ thống](../architecture.md) sau Level 4 để gắn khái niệm vào
 container/node/network/volume. Giữ [Bản đồ code](../code-map.md) mở bên cạnh IDE

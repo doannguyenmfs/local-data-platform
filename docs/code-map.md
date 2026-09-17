@@ -4,6 +4,11 @@ Tài liệu này trả lời câu hỏi “tôi đang mở file gì?” trước
 Code comment giải thích local decision; các bài `docs/learning` giải thích khái
 niệm và trade-off rộng hơn.
 
+Nếu các khái niệm từ dbt incremental trở đi còn mới, đọc
+[`docs/learning/00-beginner-map.md`](learning/00-beginner-map.md) trước. Bản đồ
+đó nối state/retry/delete xuyên suốt các tool; tài liệu này trả lời mỗi phần
+implementation nằm ở đâu.
+
 ## 1. Điểm vào nên đọc trước
 
 | Thứ tự | File | Câu hỏi file trả lời |

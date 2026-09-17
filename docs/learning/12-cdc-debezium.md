@@ -1,5 +1,9 @@
 # Level 12 — Change Data Capture với PostgreSQL và Debezium
 
+> **Trạng thái hiện tại:** phần capture/store đã hoàn thành. Customer delete đã
+> thành event `d` và tombstone trong Kafka. Phần apply/cutover chưa hoàn thành:
+> `staging.customers` và `dim_customer` chưa bị xóa theo CDC event.
+
 ## 1. Khái niệm: CDC là gì?
 
 Change Data Capture (CDC) là cơ chế quan sát các thay đổi đã commit trong hệ
@@ -293,6 +297,16 @@ Vì vậy Level 12 dừng ở durable raw change log. Bước Bronze/Silver ti�
 Đây là migration theo “parallel run → reconcile → cut over”, không phải thiếu
 delete handling. Hard delete đã được capture; chưa được quyền áp dụng vào bảng
 batch hiện hữu.
+
+Nói ngắn gọn theo trạng thái:
+
+| Capability | Trạng thái |
+| --- | --- |
+| Đọc WAL và nhận delete | Hoàn thành |
+| Lưu `d` + tombstone trong Kafka | Hoàn thành |
+| Restart/resume bằng slot + Connect offset | Hoàn thành |
+| Xóa current state ở staging/dim | Chưa thực hiện |
+| Retire customer watermark extractor | Chưa thực hiện |
 
 ## 10. Chạy và kiểm tra
 

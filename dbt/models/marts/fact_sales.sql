@@ -1,4 +1,14 @@
 {#
+  BEGINNER READING MAP
+  1. config() tells dbt how the final SELECT is persisted.
+  2. sales_order_items selects only rows newer than this table's high-water.
+  3. customer_versions resolves the historical customer key at order time.
+  4. existing_facts remembers an old date when an item moves to another day.
+  5. dbt MERGEs the final SELECT by order_item_id.
+
+  This SQL does not contain an explicit MERGE statement because dbt's
+  incremental materialization generates it from materialized/strategy/key.
+
   Grain: one row per order item. MERGE updates a business row rather than
   appending a duplicate when Airflow retries the same staging batch.
 #}
@@ -33,6 +43,8 @@
 
 with sales_order_items as (
 
+    {# STEP 1: choose the candidate delta from the reusable intermediate view. #}
+
     select
         order_id,
         order_item_id,
@@ -62,6 +74,8 @@ with sales_order_items as (
 ),
 
 customer_versions as (
+
+    {# STEP 2: load every SCD2 range needed for the temporal dimension join. #}
 
     select
         customer_sk,
@@ -118,6 +132,8 @@ earliest_customer_versions as (
 {% endif %}
 
 , resolved_sales as (
+
+    {# STEP 3: enrich each candidate fact and preserve its exact business grain. #}
 
     select
         sales.order_id,
@@ -184,6 +200,7 @@ earliest_customer_versions as (
 )
 
 select
+    {# STEP 4: this result is the source side of dbt's generated MERGE. #}
     order_item_id,
     order_id,
     customer_sk,

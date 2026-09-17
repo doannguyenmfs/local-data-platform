@@ -144,9 +144,11 @@ dbt/.venv/bin/dbt build \
   nâng cấp đã biết. Nó không thay data contract review: rename/drop/type change
   vẫn phải test và rollout có chủ đích. Nếu tổ chức muốn drift luôn dừng, đổi
   policy về `fail` sau khi migration hoàn tất.
-- Incremental không tự giải quyết hard delete ở source. Project hiện coi source
-  delete và late data cũ hơn Airflow watermark là accepted risk; backfill được
-  dùng khi phát hiện.
+- Incremental không tự giải quyết hard delete ở source. Debezium hiện đã
+  **capture và lưu** customer delete trong raw Kafka topic, nhưng chưa có
+  consumer **apply** delete đó vào staging/mart. Vì vậy dbt vẫn chưa thấy
+  customer biến mất. Late data cũ hơn Airflow watermark vẫn cần explicit
+  backfill hoặc một ingestion contract mới.
 - `--full-refresh` là thao tác có chủ đích, không dùng trong DAG hằng ngày.
 
 ## Vì sao thiết kế này thay vì các lựa chọn khác?

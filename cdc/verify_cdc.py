@@ -3,6 +3,9 @@
 The test starts a Kafka consumer at the current topic tail, mutates one isolated
 customer in three committed PostgreSQL transactions, and waits for Debezium to
 emit c/u/d plus the delete tombstone.  It leaves no source row behind.
+
+This proves CAPTURE + durable Kafka storage only.  It does not consume the event
+into staging or dbt, so it must not be interpreted as downstream delete APPLY.
 """
 
 from __future__ import annotations
@@ -116,6 +119,8 @@ def main() -> None:
         }
     )
     try:
+        # Establish the observation boundary first. Every matching message seen
+        # afterwards must have been caused by this test, not the initial snapshot.
         assign_topic_tail(consumer, topic)
         mutate_customer(customer_id)
 
