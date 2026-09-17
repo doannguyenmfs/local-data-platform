@@ -1,3 +1,5 @@
+"""Generate two years of order headers referencing existing customers."""
+
 import random
 from datetime import datetime, timedelta
 from faker import Faker
@@ -15,6 +17,7 @@ ORDER_STATUS = [
 ]
 
 def load_customer_ids(conn):
+    """Load candidate foreign keys once to avoid a query for every order."""
     with conn.cursor() as cur:
         cur.execute("""
             SELECT customer_id FROM customers
@@ -23,7 +26,9 @@ def load_customer_ids(conn):
         return customer_ids
 
 def generate_orders(conn, customer_ids):
-    # customer_ids = get_customer_ids(conn)
+    """Create source orders in COPY batches with valid customer references."""
+    # Business dates cover two years so date partition/aggregate examples have
+    # realistic spread even though all rows are generated in one local run.
     start_date = datetime.now() - timedelta(days=730)
     total_inserted = 0
     while total_inserted < TOTAL_ORDERS:

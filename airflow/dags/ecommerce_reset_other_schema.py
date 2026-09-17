@@ -1,8 +1,17 @@
+"""Manual, destructive reset DAG for local staging/analytics/metadata schemas.
+
+This DAG is intentionally unscheduled.  It replays repository-owned init SQL
+for training/reset scenarios and must never be part of the daily data path.
+PostgreSQL source tables are not reset by this file.
+"""
+
 from airflow.decorators import dag, task
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from datetime import datetime
 
 POSTGRES_CONN_ID="ecommerce_postgres"
+# Order matters: staging/analytics relations are recreated before the watermark
+# metadata that controls the next incremental run.
 SQL_FILES = [
     "/opt/postgres-sql-statement/init/002_staging_analytics_schema.sql",
     "/opt/postgres-sql-statement/init/003_create_etl_metadata.sql",
@@ -17,6 +26,7 @@ SQL_FILES = [
 def eccomerce_reset_other_schema():
     @task()
     def reset():
+        """Execute trusted SQL files mounted from this repository."""
         hook = PostgresHook(
             postgres_conn_id=POSTGRES_CONN_ID
         )

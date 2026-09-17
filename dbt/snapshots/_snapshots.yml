@@ -8,8 +8,12 @@ snapshots:
       Grain: one row per customer version.
     relation: ref('stg_customers')
     config:
+      # customer_id identifies the entity; dbt_scd_id identifies each version.
       schema: snapshots
       unique_key: customer_id
+      # Check strategy creates history only when tracked business attributes
+      # change. loaded_at is intentionally excluded so every Airflow retry does
+      # not manufacture a new customer version.
       strategy: check
       check_cols:
         - first_name

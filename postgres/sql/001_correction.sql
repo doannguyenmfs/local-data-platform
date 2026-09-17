@@ -1,4 +1,6 @@
--- set total amount in order table to actual amount in oerder_items
+-- Normalize generated source data after child rows exist. Orders are generated
+-- before order_items, so their random provisional amount must be reconciled to
+-- the sum of item quantity * unit_price.
 UPDATE orders
 SET
 	total_amount = calculated.calculated_amount,
@@ -8,7 +10,8 @@ from order_items
 group by order_id) calculated
 WHERE orders.order_id = calculated.order_id;
 
--- after update total amount in orders -> set total amount to payment
+-- Payment attempts use the order amount so downstream payment aggregation can
+-- focus on status/attempt semantics rather than synthetic amount mismatches.
 UPDATE payments
 SET
 	amount = orders.total_amount,

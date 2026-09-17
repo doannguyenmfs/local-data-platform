@@ -1,0 +1,12 @@
+# Provision a stable datasource UID so dashboard JSON never depends on a
+# manually created, environment-specific Grafana object.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

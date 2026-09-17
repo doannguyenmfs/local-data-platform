@@ -1,3 +1,7 @@
+{#
+  Preserve the order-item grain used by fact_sales. Generic unique/not-null and
+  relationship tests in _staging_models.yml defend this boundary.
+#}
 {{ config(materialized='view') }}
 
 select

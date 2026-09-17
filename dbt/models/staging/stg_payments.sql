@@ -1,3 +1,7 @@
+{#
+  Payment-attempt view. Airflow already maps source `status` to the clearer
+  `payment_status` name, so every dbt layer uses one stable column contract.
+#}
 {{ config(materialized='view') }}
 
 select

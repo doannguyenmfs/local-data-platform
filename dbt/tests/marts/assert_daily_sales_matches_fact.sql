@@ -1,3 +1,5 @@
+-- Full outer join detects missing dates on either side as well as wrong metric
+-- values. `IS DISTINCT FROM` is null-safe, unlike ordinary <> comparison.
 with expected_daily_sales as (
 
     select

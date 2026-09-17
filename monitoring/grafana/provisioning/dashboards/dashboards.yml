@@ -1,0 +1,12 @@
+# Load dashboard JSON from a read-only Git-controlled directory at startup.
+apiVersion: 1
+
+providers:
+  - name: Local Data Platform
+    orgId: 1
+    folder: Data Engineering
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

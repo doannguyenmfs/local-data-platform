@@ -1,4 +1,35 @@
-{{ config(materialized='table') }}
+{#
+  Grain: one row per order item. MERGE updates a business row rather than
+  appending a duplicate when Airflow retries the same staging batch.
+#}
+{{
+    config(
+        materialized='incremental',
+        incremental_strategy='merge',
+        unique_key='order_item_id',
+        on_schema_change='sync_all_columns',
+        indexes=[
+            {'columns': ['order_date']},
+            {'columns': ['customer_sk']},
+            {'columns': ['product_id']},
+            {'columns': ['source_loaded_at']}
+        ]
+    )
+}}
+
+{#
+  A project upgrade can encounter a relation created before source_loaded_at
+  existed.  In that one migration run, read all rows and let dbt add the new
+  columns before MERGE.  Normal runs retain the high-water filter.
+#}
+{% set target_state = namespace(has_source_loaded_at=false) %}
+{% if is_incremental() %}
+    {% for column in adapter.get_columns_in_relation(this) %}
+        {% if column.name | lower == 'source_loaded_at' %}
+            {% set target_state.has_source_loaded_at = true %}
+        {% endif %}
+    {% endfor %}
+{% endif %}
 
 with sales_order_items as (
 
@@ -13,9 +44,20 @@ with sales_order_items as (
         unit_price,
         sales_amount,
         payment_status,
-        payment_attempt_count
+        payment_attempt_count,
+        source_loaded_at
 
     from {{ ref('int_sales_order_items') }}
+
+    {# Business date is not an ingestion cursor: historical orders may change. #}
+    {% if is_incremental() and target_state.has_source_loaded_at %}
+
+    where source_loaded_at > coalesce(
+        (select max(source_loaded_at) from {{ this }}),
+        '1900-01-01 00:00:00+00'::timestamptz
+    )
+
+    {% endif %}
 
 ),
 
@@ -40,6 +82,8 @@ earliest_customer_versions as (
 
     from (
 
+        -- Seed data may contain orders older than the first captured snapshot.
+        -- Rank one deterministic fallback version rather than dropping facts.
         select
             customer_sk,
             customer_id,
@@ -55,9 +99,25 @@ earliest_customer_versions as (
 
     where version_number = 1
 
-),
+)
 
-resolved_sales as (
+{% if is_incremental() %}
+
+, existing_facts as (
+
+    -- Preserve the previous date only when a changed item crosses a day. The
+    -- downstream daily mart uses it to repair the now-stale old partition.
+    select
+        order_item_id,
+        order_date
+
+    from {{ this }}
+
+)
+
+{% endif %}
+
+, resolved_sales as (
 
     select
         sales.order_id,
@@ -69,12 +129,27 @@ resolved_sales as (
         ) as customer_sk,
         sales.product_id,
         sales.order_date,
+
+        {% if is_incremental() %}
+
+        case
+            when existing_facts.order_date is distinct from sales.order_date
+                then existing_facts.order_date
+        end as previous_order_date,
+
+        {% else %}
+
+        null::timestamptz as previous_order_date,
+
+        {% endif %}
+
         sales.order_status,
         sales.quantity,
         sales.unit_price,
         sales.sales_amount,
         sales.payment_status,
         sales.payment_attempt_count,
+        sales.source_loaded_at,
         case
             when matching_customer_version.customer_sk is not null
                 then 'as_of'
@@ -85,6 +160,7 @@ resolved_sales as (
 
     from sales_order_items as sales
 
+    -- Half-open validity ranges ensure one version owns an exact boundary.
     left join customer_versions as matching_customer_version
         on sales.customer_id = matching_customer_version.customer_id
         and sales.order_date >= matching_customer_version.valid_from
@@ -98,6 +174,13 @@ resolved_sales as (
         and matching_customer_version.customer_sk is null
         and sales.order_date < earliest_customer_version.valid_from
 
+    {% if is_incremental() %}
+
+    left join existing_facts
+        on sales.order_item_id = existing_facts.order_item_id
+
+    {% endif %}
+
 )
 
 select
@@ -107,12 +190,14 @@ select
     customer_id,
     product_id,
     order_date,
+    previous_order_date,
     order_status,
     quantity,
     unit_price,
     sales_amount,
     payment_status,
     payment_attempt_count,
+    source_loaded_at,
     customer_key_resolution
 
 from resolved_sales

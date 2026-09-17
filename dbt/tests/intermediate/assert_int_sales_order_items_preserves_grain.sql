@@ -1,3 +1,5 @@
+-- Singular dbt tests pass when this query returns zero rows. The one-to-one
+-- count check proves payment enrichment did not multiply or drop order items.
 with source_count as (
     select count(*) as row_count
     from {{ ref('stg_order_items') }}

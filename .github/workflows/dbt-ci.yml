@@ -1,3 +1,5 @@
+# Validate both creation and the stateful incremental path. The mutation phase
+# catches stale aggregates that a one-shot `dbt build` would never exercise.
 name: dbt CI
 
 on:
@@ -123,3 +125,44 @@ jobs:
             --profiles-dir dbt \
             --target ci \
             --no-partial-parse
+
+      - name: Rebuild to verify incremental idempotency
+        run: |
+          dbt build \
+            --project-dir dbt \
+            --profiles-dir dbt \
+            --target ci \
+            --no-partial-parse
+
+      - name: Mutate staging data
+        env:
+          PGPASSWORD: ${{ env.ECOMMERCE_POSTGRES_PASSWORD }}
+        run: |
+          psql \
+            --host "$ECOMMERCE_POSTGRES_HOST" \
+            --port "$ECOMMERCE_POSTGRES_HOST_PORT" \
+            --username "$ECOMMERCE_POSTGRES_USER" \
+            --dbname "$ECOMMERCE_POSTGRES_DB" \
+            --set ON_ERROR_STOP=1 \
+            --file postgres/ci/002_mutate_staging.sql
+
+      - name: Build changed records incrementally
+        run: |
+          dbt build \
+            --project-dir dbt \
+            --profiles-dir dbt \
+            --target ci \
+            --no-partial-parse
+
+      - name: Assert incremental results
+        env:
+          PGPASSWORD: ${{ env.ECOMMERCE_POSTGRES_PASSWORD }}
+        run: |
+          psql \
+            --host "$ECOMMERCE_POSTGRES_HOST" \
+            --port "$ECOMMERCE_POSTGRES_HOST_PORT" \
+            --username "$ECOMMERCE_POSTGRES_USER" \
+            --dbname "$ECOMMERCE_POSTGRES_DB" \
+            --set ON_ERROR_STOP=1 \
+            --set dbt_schema="$DBT_CI_SCHEMA" \
+            --file postgres/ci/003_assert_incremental_results.sql

@@ -1,3 +1,6 @@
+-- DESTRUCTIVE LOCAL INITIALIZATION: these DROP statements are safe only when a
+-- new lab volume/reset is intended. Daily Airflow runs upsert existing staging
+-- state and dbt owns its target schemas independently.
 DROP SCHEMA IF EXISTS staging CASCADE;
 DROP SCHEMA IF EXISTS analytics CASCADE;
 CREATE SCHEMA IF NOT EXISTS staging;
@@ -6,6 +9,9 @@ CREATE SCHEMA IF NOT EXISTS analytics;
 -- ==============
 -- STAGING DATA
 -- ==============
+-- Staging tables represent current source state at the source primary-key
+-- grain. They intentionally omit source foreign keys so a batch can land first
+-- and fail explicit relationship validation with observable failure rows.
 CREATE TABLE IF NOT EXISTS staging.customers (
     customer_id UUID PRIMARY KEY,
     first_name TEXT,
@@ -63,6 +69,8 @@ CREATE TABLE IF NOT EXISTS staging.payments (
 -- ==============
 -- ANALYTICS DATA
 -- ==============
+-- These tables document the pre-dbt warehouse shape and support reset lessons.
+-- The active dbt dev/ci/prod targets create their own schemas/materializations.
 CREATE TABLE IF NOT EXISTS analytics.dim_customer (
     customer_sk BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     customer_id UUID NOT NULL,

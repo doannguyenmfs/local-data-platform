@@ -1,3 +1,6 @@
+-- Pipeline control state lives outside staging so replacing/rebuilding landing
+-- relations cannot silently reset progress. candidate_value is a prepared but
+-- uncommitted upper bound; watermark_value is safe for all downstream users.
 DROP SCHEMA IF EXISTS metadata CASCADE;
 CREATE SCHEMA IF NOT EXISTS metadata;
 CREATE TABLE IF NOT EXISTS metadata.etl_watermark (
@@ -12,6 +15,8 @@ INSERT INTO metadata.etl_watermark (
     watermark_value
 )
 VALUES
+    -- Epoch makes the first scheduled run equivalent to an initial full load
+    -- while keeping exactly the same incremental code path.
     (
         'staging_customers',
         '1970-01-01 00:00:00+00'::TIMESTAMPTZ

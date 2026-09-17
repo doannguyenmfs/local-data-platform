@@ -1,3 +1,5 @@
+-- Compare both total and distinct grain counts. A unique test alone would not
+-- detect missing order items; this reconciliation protects completeness too.
 with intermediate_metrics as (
 
     select

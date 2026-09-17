@@ -135,6 +135,11 @@ models:
         data_tests:
           - not_null
 
+      - name: previous_order_date
+        description: >
+          Previous business timestamp when an incremental update moves an
+          order item to another day. Used to repair both daily aggregates.
+
       - name: order_status
         description: Operational status of the order.
 
@@ -166,6 +171,11 @@ models:
 
       - name: payment_attempt_count
         description: Number of payment attempts recorded for the order.
+
+      - name: source_loaded_at
+        description: Latest relevant staging load timestamp for incremental processing.
+        data_tests:
+          - not_null
 
       - name: customer_key_resolution
         description: >
@@ -208,5 +218,10 @@ models:
 
       - name: paid_sales
         description: Sales amount belonging to orders classified as paid.
+        data_tests:
+          - not_null
+
+      - name: max_source_loaded_at
+        description: Incremental high-water mark of the facts represented by the day.
         data_tests:
           - not_null

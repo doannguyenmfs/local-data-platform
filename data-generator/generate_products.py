@@ -1,3 +1,5 @@
+"""Generate a bounded ecommerce product catalog for source-data exercises."""
+
 from faker import Faker
 import random
 
@@ -16,6 +18,7 @@ CATEGORIES = [
 fake = Faker()
 
 def generate_products(conn):
+    """Stream product rows through COPY while preserving source constraints."""
     with conn.cursor() as cur:
         with cur.copy(
             """

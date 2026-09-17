@@ -1,3 +1,5 @@
+-- Current dimension membership must equal current staging membership. This
+-- also exposes the still-deferred source->staging hard-delete mapping gap.
 with staging_customers as (
     select customer_id
     from {{ ref('stg_customers') }}
