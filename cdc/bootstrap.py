@@ -163,6 +163,13 @@ def wait_for_connect(base_url: str, timeout_seconds: int = 180) -> None:
 def connector_config() -> dict[str, str]:
     """Build the source-controlled connector contract from runtime secrets."""
     topic_prefix = required("CDC_TOPIC_PREFIX")
+    registry_url = required("SCHEMA_REGISTRY_NATIVE_URL")
+
+    # Connector-level converters make the data-topic wire contract explicit.
+    # Kafka Connect's worker defaults can remain JSON for unrelated connectors.
+    # `as-confluent` uses the widely supported magic-byte + schema-id wire
+    # format, while Apicurio remains the registry implementation behind it.
+    avro_converter = "io.apicurio.registry.utils.converter.AvroConverter"
     return {
         "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
         # PostgreSQL WAL is one ordered stream per connector; tasks.max > 1
@@ -190,6 +197,23 @@ def connector_config() -> dict[str, str]:
         "tombstones.on.delete": "true",
         "provide.transaction.metadata": "true",
         "heartbeat.interval.ms": "10000",
+        "schema.name.adjustment.mode": "avro",
+        "key.converter": avro_converter,
+        "key.converter.apicurio.registry.url": registry_url,
+        "key.converter.apicurio.registry.auto-register": "true",
+        "key.converter.apicurio.registry.find-latest": "true",
+        "key.converter.apicurio.registry.as-confluent": "true",
+        "key.converter.apicurio.use-id": "contentId",
+        "key.converter.apicurio.registry.headers.enabled": "false",
+        "key.converter.schemas.enable": "false",
+        "value.converter": avro_converter,
+        "value.converter.apicurio.registry.url": registry_url,
+        "value.converter.apicurio.registry.auto-register": "true",
+        "value.converter.apicurio.registry.find-latest": "true",
+        "value.converter.apicurio.registry.as-confluent": "true",
+        "value.converter.apicurio.use-id": "contentId",
+        "value.converter.apicurio.registry.headers.enabled": "false",
+        "value.converter.schemas.enable": "false",
         # Broker auto-create is disabled. Kafka Connect creates topics with an
         # explicit default, while table topics get log compaction for keyed
         # current-state consumers. Local RF=1 reflects the one-broker topology.

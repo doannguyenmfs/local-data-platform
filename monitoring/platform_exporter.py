@@ -97,6 +97,7 @@ def collect_postgres() -> None:
                     """
                     SELECT pipeline_name, watermark_value, candidate_value
                     FROM metadata.etl_watermark
+                    WHERE active
                     """
                 )
                 # Freshness is measured from the committed watermark.  Candidate
@@ -123,7 +124,10 @@ def collect_postgres() -> None:
                 # A replication slot intentionally prevents PostgreSQL from
                 # deleting unread WAL. This is CDC durability, but an inactive
                 # or lagging slot can also fill the source database disk.
-                slot = env("CDC_SLOT_NAME", "ecommerce_cdc_slot")
+                # Keep the fallback aligned with the Avro connector deployed by
+                # Compose. A stale fallback would make monitoring inspect the
+                # retired JSON slot whenever an operator forgets one env var.
+                slot = env("CDC_SLOT_NAME", "ecommerce_cdc_avro_slot")
                 cursor.execute(
                     """
                     SELECT
@@ -191,7 +195,7 @@ def collect_debezium() -> None:
     # HTTP 200 from the worker only proves the worker process answers. A source
     # task can still be FAILED, so health requires connector + every task to be
     # RUNNING. WAL retention is checked separately in collect_postgres().
-    connector = env("CDC_CONNECTOR_NAME", "ecommerce-postgres-cdc")
+    connector = env("CDC_CONNECTOR_NAME", "ecommerce-postgres-cdc-avro")
     base_url = env("DEBEZIUM_CONNECT_URL", "http://debezium-connect:8083")
     try:
         response = requests.get(
@@ -221,6 +225,9 @@ def collect() -> None:
     collect_postgres()
     collect_kafka()
     collect_debezium()
+    # Registry readiness is separate from Debezium task state. A connector can
+    # remain alive briefly while schema lookup/registration is unavailable.
+    collect_http("schema_registry", env("SCHEMA_REGISTRY_HEALTH_URL"))
     collect_http("spark_gateway", env("SPARK_GATEWAY_HEALTH_URL"))
     collect_http("minio", env("MINIO_HEALTH_URL"))
     collect_http("airflow", env("AIRFLOW_HEALTH_URL"))

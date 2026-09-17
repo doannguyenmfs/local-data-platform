@@ -43,16 +43,16 @@ thường xuyên; side effect lúc import sẽ chạy khi parse chứ không ph�
 
 ## Vì sao extract song song nhưng validate nối tiếp?
 
-Năm bảng source không phụ thuộc nhau trong thao tác copy nên được fan-out để
-giảm wall-clock time. `validate_record_count` chỉ chạy sau khi cả năm hoàn tất;
+Các bảng batch không phụ thuộc nhau trong thao tác copy nên được fan-out để
+giảm wall-clock time. Customer do CDC Silver sở hữu liên tục. Validation chỉ
+chạy sau khi cả bốn extract hoàn tất;
 `validate_relationships` chạy tiếp để chắc các foreign-key logical đã đầy đủ.
 
 ```text
 validate config
       │
-      ├── customers ─┐
-      ├── products  ─┤
-      ├── orders    ─┼── count ── relationships
+      ├── products  ─┐
+      ├── orders    ─┼── count (gồm Silver customer) ── relationships
       ├── items     ─┤
       └── payments  ─┘
 ```

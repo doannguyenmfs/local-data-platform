@@ -1,8 +1,8 @@
 # Level 12 — Change Data Capture với PostgreSQL và Debezium
 
-> **Trạng thái hiện tại:** phần capture/store đã hoàn thành. Customer delete đã
-> thành event `d` và tombstone trong Kafka. Phần apply/cutover chưa hoàn thành:
-> `staging.customers` và `dim_customer` chưa bị xóa theo CDC event.
+> **Trạng thái hiện tại:** capture/store và apply/cutover đều đã hoàn thành.
+> Level này tập trung WAL/Debezium; đọc Level 13 cho Avro/Registry và Level 14
+> cho Bronze/Silver/delete apply/ownership cutover.
 
 ## 1. Khái niệm: CDC là gì?
 
@@ -23,7 +23,7 @@ PostgreSQL WAL
 Debezium PostgreSQL connector chạy trong Kafka Connect
           │ event key = customer_id
           ▼
-Kafka topic ecommerce_cdc.public.customers
+Kafka topic ecommerce_cdc_avro.public.customers
 ```
 
 CDC không phải một lịch chạy Airflow nhanh hơn. Connector là process chạy liên
@@ -86,7 +86,7 @@ table.
 
 ### 3.4 Replication slot
 
-`ecommerce_cdc_slot` giữ vị trí WAL mà connector còn cần. Khi connector dừng,
+`ecommerce_cdc_avro_slot` giữ vị trí WAL mà connector còn cần. Khi connector dừng,
 PostgreSQL không được xóa WAL cũ hơn `restart_lsn`; nhờ vậy restart có thể catch
 up mà không mất mutation.
 
@@ -123,35 +123,31 @@ một lần.
 
 ## 5. Event Debezium và ý nghĩa operation
 
-Kafka Connect dùng JSON converter và giữ schema wrapper. Mỗi record ngoài cùng
-có `schema` mô tả type/optionality và `payload` chứa Debezium envelope. Ví dụ
-dưới đây rút gọn phần schema để tập trung vào payload:
+Kafka Connect dùng Apicurio Avro converter. Kafka value chứa magic byte + schema
+ID + binary Avro payload; consumer lookup schema qua Registry rồi nhận Debezium
+envelope dạng object. Ví dụ dưới đây biểu diễn object logic sau deserialize:
 
 ```json
 {
-  "schema": {"type": "struct", "fields": ["..."]},
-  "payload": {
-    "before": null,
-    "after": {
-      "customer_id": "...",
-      "first_name": "CDC",
-      "last_name": "Created"
-    },
-    "source": {
-      "schema": "public",
-      "table": "customers",
-      "lsn": 123456,
-      "snapshot": "false"
-    },
-    "op": "c",
-    "ts_ms": 1780000000000
-  }
+  "before": null,
+  "after": {
+    "customer_id": "...",
+    "first_name": "CDC",
+    "last_name": "Created"
+  },
+  "source": {
+    "schema": "public",
+    "table": "customers",
+    "lsn": 123456,
+    "snapshot": "false"
+  },
+  "op": "c",
+  "ts_ms": 1780000000000
 }
 ```
 
-Schemaful JSON dễ học contract và giữ type metadata nhưng lặp schema trên từng
-message nên rất lớn. Bước Schema Registry tiếp theo sẽ đưa schema ra registry và
-dùng Avro/Protobuf/JSON Schema để giảm payload, kiểm tra compatibility tập trung.
+Registry giữ schema version/reference; topic chỉ giữ schema ID và Avro data.
+`BACKWARD_TRANSITIVE` chặn type change phá mọi version cũ.
 
 | `op` | Nghĩa | `before` | `after` |
 | --- | --- | --- | --- |
@@ -175,7 +171,7 @@ Debezium mặc định đặt topic theo:
 
 ```text
 <topic.prefix>.<schema>.<table>
-ecommerce_cdc.public.customers
+ecommerce_cdc_avro.public.customers
 ```
 
 Key chứa `customer_id`, nên các mutation của cùng customer được Kafka hash vào
@@ -214,9 +210,11 @@ chia connector/database/table scope có chủ đích và dùng slot riêng.
 ### `docker-compose.yml`
 
 - PostgreSQL bật logical WAL và safety cap.
-- `debezium-connect` chạy image 3.6.2.Final, tương thích dòng Kafka 4.3.
+- `schema-registry` giữ Avro subjects và compatibility policy.
+- `debezium-connect` chạy image 3.6.2.Final với connector-level Avro converter.
 - `cdc-bootstrap` là init job hữu hạn.
 - `cdc-smoke-test` là tool chạy tay, không phải daemon.
+- `customer-cdc-materializer` là consumer dài hạn ghi Bronze/Silver.
 
 Hai tool COPY code vào image để CI/deployment không phụ thuộc host, đồng thời
 Compose bind-mount `cdc/` read-only để local sửa và thử lại không phải rebuild
@@ -231,7 +229,7 @@ Tên identifier được quote bằng `psycopg.sql.Identifier`. PostgreSQL utili
 không nhận bind placeholder ở `PASSWORD`, nên password được quote bằng
 `psycopg.sql.Literal`; code không nối chuỗi SQL thủ công.
 
-Sau đó script dùng `PUT /connectors/ecommerce-postgres-cdc/config`. PUT làm thao
+Sau đó script dùng `PUT /connectors/ecommerce-postgres-cdc-avro/config`. PUT làm thao
 tác convergent: chạy lại cập nhật config hiện có thay vì lỗi “already exists”.
 Job chỉ success khi connector và source task đều `RUNNING`.
 
@@ -258,7 +256,8 @@ assign đúng các offset số đó và dùng một UUID riêng để:
 Test xóa row của chính nó nên không làm bẩn source current state. UUID giúp lọc
 khỏi initial snapshot/event khác đang chạy.
 
-Test không dùng `subscribe()` vì group assignment và `latest` offset reset là
+Test deserialize Avro bằng schema ID từ Apicurio ccompat API. Nó không dùng
+`subscribe()` vì group assignment và `latest` offset reset là
 bất đồng bộ: partition có thể đã hiện trong assignment nhưng position cuối chưa
 resolve. Mutation rất nhanh có thể rơi đúng race đó. Explicit tail assignment
 phù hợp one-process diagnostic; application consumer thật vẫn dùng group. Chỉ
@@ -276,27 +275,26 @@ Exporter phân biệt HTTP process sống với connector thực sự chạy. C�
 Prometheus cảnh báo connector/task không RUNNING, slot inactive và WAL retained
 vượt 512 MiB. Đây là ba failure mode quan trọng hơn việc chỉ ping port 8083.
 
-## 9. Vì sao CDC chưa ghi thẳng vào `staging.customers`?
+## 9. Vì sao CDC không ghi thẳng vào `staging.customers`?
 
-Hiện `staging.customers` do Airflow watermark extractor sở hữu. Nếu một consumer
-CDC cùng upsert/delete vào đó, hai writer có semantics khác nhau:
+Ghi trực tiếp khi Airflow còn sở hữu `staging.customers` sẽ tạo hai writer có
+semantics khác nhau:
 
 - batch có candidate/commit barrier theo ngày;
 - CDC commit liên tục theo LSN;
 - backfill batch có thể hồi sinh row CDC vừa xóa;
 - dbt build có thể thấy state giữa một CDC transaction group.
 
-Vì vậy Level 12 dừng ở durable raw change log. Bước Bronze/Silver tiếp theo sẽ:
+Project đã migration theo thứ tự:
 
-1. append nguyên envelope vào Bronze;
+1. append envelope vào Bronze;
 2. dedupe bằng source coordinates/event identity;
 3. materialize Silver current state bằng operation + LSN;
 4. chuyển dbt source/ownership khỏi staging batch sau khi đối soát;
-5. lúc đó mới retire customer watermark extractor.
+5. retire customer watermark extractor và đánh dấu watermark `active=false`.
 
-Đây là migration theo “parallel run → reconcile → cut over”, không phải thiếu
-delete handling. Hard delete đã được capture; chưa được quyền áp dụng vào bảng
-batch hiện hữu.
+Không ghi ngược staging cũ. `stg_customers` của dbt là view interface đọc
+`cdc_silver.customers_current`; tên model ổn định nhưng physical owner đã đổi.
 
 Nói ngắn gọn theo trạng thái:
 
@@ -305,8 +303,8 @@ Nói ngắn gọn theo trạng thái:
 | Đọc WAL và nhận delete | Hoàn thành |
 | Lưu `d` + tombstone trong Kafka | Hoàn thành |
 | Restart/resume bằng slot + Connect offset | Hoàn thành |
-| Xóa current state ở staging/dim | Chưa thực hiện |
-| Retire customer watermark extractor | Chưa thực hiện |
+| Xóa current state ở Silver/dim | Hoàn thành |
+| Retire customer watermark extractor | Hoàn thành |
 
 ## 10. Chạy và kiểm tra
 
@@ -317,13 +315,13 @@ docker compose \
   --profile streaming \
   --profile spark \
   --profile lakehouse \
-  up -d --build postgres kafka kafka-init debezium-connect cdc-bootstrap
+  up -d --build postgres kafka schema-registry debezium-connect customer-cdc-materializer
 ```
 
 Kiểm tra worker/connector:
 
 ```bash
-curl --fail http://localhost:8083/connectors/ecommerce-postgres-cdc/status
+curl --fail http://localhost:8083/connectors/ecommerce-postgres-cdc-avro/status
 
 docker compose exec -T postgres psql \
   -U "$ECOMMERCE_POSTGRES_USER" \
@@ -334,7 +332,9 @@ docker compose exec -T postgres psql \
 Chạy bằng chứng end-to-end:
 
 ```bash
-docker compose --profile '*' run --rm --no-deps cdc-smoke-test
+docker compose --profile '*' run --rm cdc-smoke-test
+docker compose --profile '*' run --rm cdc-materialization-test
+docker compose --profile '*' run --rm cdc-reconcile
 ```
 
 Kết quả đúng:
@@ -343,16 +343,13 @@ Kết quả đúng:
 CDC smoke test passed: operations=c,u,d; delete_tombstone=true; ...
 ```
 
-Đọc raw event để học cấu trúc:
+Avro là binary nên Kafka console consumer thường không hiển thị object hữu ích.
+Dùng Bronze SQL để học envelope đã decode:
 
 ```bash
-docker compose exec -T kafka \
-  /opt/kafka/bin/kafka-console-consumer.sh \
-  --bootstrap-server localhost:19092 \
-  --topic ecommerce_cdc.public.customers \
-  --from-beginning \
-  --property print.key=true \
-  --property key.separator=' | '
+docker compose exec -T postgres psql \
+  -U "$ECOMMERCE_POSTGRES_USER" -d "$ECOMMERCE_POSTGRES_DB" \
+  -c "select operation, customer_id, source_lsn, before_value, after_value from cdc_bronze.customer_changes order by ingested_at desc limit 10;"
 ```
 
 ## 11. Failure mode và cách xử lý
@@ -400,6 +397,8 @@ nhưng nghĩa provenance khác. Audit consumer không nên đổi `r` thành bus
 - `docker-compose.yml`: WAL flags, Connect worker, bootstrap/smoke services.
 - `cdc/bootstrap.py`: privilege, publication, connector contract.
 - `cdc/verify_cdc.py`: bằng chứng create/update/delete/tombstone.
+- `cdc/materialize_customers.py`: Bronze/Silver idempotent apply.
+- `schema_registry/verify_contract.py`: compatibility proof.
 - `monitoring/platform_exporter.py`: connector và slot metrics.
 - `monitoring/prometheus/alerts.yml`: operational thresholds.
 
@@ -420,4 +419,5 @@ nhưng nghĩa provenance khác. Audit consumer không nên đổi `r` thành bus
 - Initial snapshot tạo `r`, mutation mới tạo `c/u/d`.
 - Delete có tombstone và smoke test tự dọn source row.
 - Connector/slot/WAL retention có metric và alert.
-- Batch staging chưa bị biến thành multi-writer ngoài ý muốn.
+- Customer polling writer đã retire; Silver có đúng một owner.
+- Source/Silver reconciliation và materialization delete test pass.

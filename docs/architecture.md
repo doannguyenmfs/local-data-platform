@@ -26,11 +26,11 @@ cùng laptop. Vì vậy mỗi distributed system chỉ có số node tối thi�
                             DATA PLANE
 ┌──────────────────────────────────────────────────────────────────────┐
 │ Ecommerce PostgreSQL                                                │
-│ public source -> staging -> dbt dev/ci/prod schemas                 │
+│ public source -> staging/CDC Silver -> dbt dev/ci/prod schemas      │
 │      │ JDBC                 │                                       │
 │      ├──────────────► Spark batch ──► Iceberg catalog + MinIO       │
 │      ├──────────────► Kafka ──► Spark stream ──► Iceberg            │
-│      └─ WAL ─► Debezium Connect ─► Kafka CDC topics                 │
+│      └─ WAL ─► Debezium ─► Avro/Registry ─► Bronze ─► Silver       │
 └──────────────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
@@ -47,10 +47,10 @@ compute engine hoặc dùng monitoring database làm source of truth.
 
 ## 3. Physical topology: container và node
 
-Compose định nghĩa 29 services: 19 process chạy dài hạn, 4 init job chạy rồi
-thoát và 6 one-shot tool chỉ được tạo khi gọi `docker compose run`.
+Compose định nghĩa 35 services: 21 process chạy dài hạn, 4 init job chạy rồi
+thoát và 10 one-shot tool chỉ được tạo khi gọi `docker compose run`.
 
-### 3.1 Long-running containers: 19
+### 3.1 Long-running containers: 21
 
 | Nhóm | Container/service | Node count | Trách nhiệm |
 | --- | --- | ---: | --- |
@@ -67,6 +67,8 @@ thoát và 6 one-shot tool chỉ được tạo khi gọi `docker compose run`.
 | Spark | `spark-gateway` | 1 driver gateway | allow-list và submit finite Spark jobs |
 | Streaming | `kafka` | 1 combined broker/controller | KRaft event log |
 | CDC | `debezium-connect` | 1 Connect worker, 1 PostgreSQL source task | WAL -> table topics |
+| Contract | `schema-registry` | 1 Apicurio node | Avro subjects, versions và compatibility |
+| CDC apply | `customer-cdc-materializer` | 1 consumer process | Avro topic -> PostgreSQL Bronze/Silver |
 | Streaming | `order-stream` | 1 long-running Spark driver | đọc Kafka micro-batch và ghi Iceberg |
 | Lake storage | `minio` | 1 object-storage node | bucket `warehouse` chứa Iceberg files |
 | Monitoring | `platform-exporter` | 1 | chuyển health/data state thành Prometheus metrics |
@@ -91,7 +93,7 @@ Trạng thái `Exited (0)` của init container là thành công, không phải 
 down. Giữ init logic riêng giúp startup repeatable và không nhét migration vào
 mọi daemon.
 
-### 3.3 One-shot tools: 6
+### 3.3 One-shot tools: 10
 
 | Service | Công việc |
 | --- | --- |
@@ -101,6 +103,10 @@ mọi daemon.
 | `order-producer` | publish deterministic order events |
 | `order-stream-once` | xử lý Kafka backlog rồi dừng |
 | `cdc-smoke-test` | chứng minh customer `c/u/d` và delete tombstone |
+| `schema-contract-test` | chứng minh policy và breaking schema bị từ chối |
+| `customer-cdc-once` | drain CDC backlog rồi thoát |
+| `cdc-materialization-test` | chứng minh Bronze/Silver create/update/delete |
+| `cdc-reconcile` | đối soát source với Silver current state |
 
 Các service này thuộc profile `tools` và không chạy khi `up`. Chúng dùng cùng
 image/config với runtime thật để tránh “test trên môi trường khác production”.
@@ -135,6 +141,7 @@ hoặc API cần người dùng truy cập.
 | 8081 | `spark-master:8080` | Spark master UI |
 | 8082 | `spark-worker:8080` | Spark worker UI |
 | 8083 | `debezium-connect:8083` | Kafka Connect REST quản trị connector |
+| 8084 | `schema-registry:8080` | Registry API; internal health ở port 9000 |
 | 8090 | `spark-gateway:8090` | local job API/health |
 | 9000 | `minio:9000` | S3-compatible API |
 | 9001 | `minio:9001` | MinIO console |
@@ -174,9 +181,9 @@ PostgreSQL và immutable object tree trong MinIO. Backup chỉ một phía khôn
 `lakehouse-data` không phải Iceberg warehouse; nó giữ Parquet demo và Spark
 checkpoint. Iceberg warehouse thật nằm trong MinIO `s3://warehouse/`.
 
-CDC state không có volume Connect riêng. Connector config/status/offset nằm
-trong các Kafka internal topic trên `kafka-data`; replication slot/LSN nằm trong
-PostgreSQL trên `ecommerce-postgres-data`. Hai phía phải được phục hồi nhất quán.
+CDC state không có volume Connect riêng. Connector config/status/offset và
+Registry journal nằm trong Kafka; replication slot/LSN và Bronze/Silver nằm
+trong PostgreSQL. Các phía phải được phục hồi nhất quán.
 
 ### 6.2 Bind mounts
 
@@ -191,7 +198,7 @@ PostgreSQL trên `ecommerce-postgres-data`. Hai phía phải được phục h�
 ### 7.1 Daily batch path
 
 ```text
-public.* --updated_at window--> staging.*
+public products/orders/order_items/payments --updated_at window--> staging.*
     ├── dbt build --> dbt_dev/dbt_ci/analytics
     ├── Spark JDBC --> Iceberg fact_sales --> MinIO
     └── producer --> Kafka durable log
@@ -222,14 +229,17 @@ Stable keys làm final state idempotent.
 ```text
 public.customers transaction commit
   -> PostgreSQL WAL / pgoutput
-  -> ecommerce_cdc_slot retains unread WAL
-  -> Debezium source task
-  -> ecommerce_cdc.public.customers (r/c/u/d + tombstone)
+  -> ecommerce_cdc_avro_slot retains unread WAL
+  -> Debezium source task + Apicurio Avro schema ID
+  -> ecommerce_cdc_avro.public.customers (r/c/u/d + tombstone)
+  -> cdc_bronze.customer_changes (append-only Kafka coordinates)
+  -> cdc_silver.customers (latest state + delete tombstone)
+  -> customers_current -> stg_customers -> snapshot -> dim_customer
 ```
 
-Initial snapshot bootstrap current rows; sau đó connector tiếp tục từ LSN đã
-ghi. CDC topic hiện là raw durable log và chưa ghi ngược vào `staging.customers`
-để tránh hai writer cạnh tranh với Airflow batch extractor.
+Consumer commit PostgreSQL trước Kafka offset. Nếu crash ở giữa, record được
+replay nhưng Bronze primary key biến nó thành no-op. Airflow không còn extract
+customer, vì vậy Silver là single owner và không có dual writer.
 
 ### 7.4 Observability path
 
@@ -242,7 +252,7 @@ Với CDC, exporter còn kiểm tra connector/task state, slot active và WAL by
 
 ## 8. Compute và resource allocation
 
-- Airflow worker concurrency là 4, đủ chạy năm extract theo nhiều wave và ba
+- Airflow worker concurrency là 4, đủ chạy bốn extract và ba
   downstream branch nhưng vẫn giới hạn laptop load.
 - Spark worker có 2 cores/3 GiB.
 - Long-running stream dùng tối đa 1 core/1 GiB executor để chừa tài nguyên.
@@ -250,6 +260,7 @@ Với CDC, exporter còn kiểm tra connector/task state, slot active và WAL by
   submissions để tránh hai driver tranh worker nhỏ.
 - PostgreSQL ecommerce giới hạn 2 GiB trong lab.
 - Kafka Connect giới hạn 1 GiB container, Java heap tối đa 768 MiB.
+- Schema Registry giới hạn 1 GiB; customer materializer là Python process nhẹ.
 
 Đây là capacity guardrail, không phải sizing formula. Production phải benchmark
 dựa trên input volume, shuffle, state size, file size và SLA.
@@ -278,6 +289,8 @@ manager và audit log.
 | Spark batch failure | committed Iceberg snapshot cũ | Airflow retry |
 | Kafka broker restart | `kafka-data` volume | broker restart |
 | Debezium restart | Connect offset topic + PostgreSQL slot | Connect restart/catch-up |
+| Customer materializer restart | Kafka consumer offset + Bronze PK | replay idempotent/catch-up |
+| Registry restart | KafkaSQL journal topic | rebuild Registry state từ Kafka |
 | Debezium dừng quá lâu | slot giữ WAL tới safety cap | khôi phục connector hoặc controlled resnapshot |
 | MinIO restart | `minio-data` volume | service restart |
 | Candidate watermark treo | PostgreSQL metadata | operator theo runbook |
@@ -292,7 +305,8 @@ Off-host backup và restore drill vẫn là khoảng trống production.
 - Analytics engineering: `dbt/`
 - Spark batch/lakehouse/stream: `spark/jobs/`
 - Event producer: `kafka/producer/`
-- CDC bootstrap/verification: `cdc/`
+- CDC bootstrap/materialization/reconciliation: `cdc/`
+- Registry contract verification: `schema_registry/`
 - Monitoring: `monitoring/`
 - CI: `.github/workflows/`
 - Operations: `docs/runbook.md`

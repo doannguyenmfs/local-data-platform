@@ -44,6 +44,7 @@ implementation nằm ở đâu.
 | `postgres/init/003_create_etl_metadata.sql` | tạo/seed committed và candidate watermark |
 | `postgres/sql/001_correction.sql` | câu lệnh sửa dữ liệu phục vụ bài thực hành |
 | `postgres/sql/002_validation.sql` | query kiểm tra dữ liệu thủ công |
+| `postgres/sql/003_cdc_customer_layers.sql` | online migration tạo CDC Bronze/Silver/current view |
 | `postgres/ci/*.sql` | seed nhỏ, mutation và assertion cho dbt CI |
 | `data-generator/*.py` | sinh dataset OLTP lớn cho local benchmark |
 
@@ -68,7 +69,7 @@ database, dbt executable, Spark gateway và producer theo dependency.
 | --- | --- |
 | `dbt/dbt_project.yml` | project metadata và source paths |
 | `dbt/profiles.yml` | targets dev/ci/prod, connection qua env vars |
-| `dbt/models/staging/_sources.yml` | khai báo physical source relation |
+| `dbt/models/staging/_sources.yml` | khai báo batch staging và CDC Silver source relations |
 | `dbt/models/staging/stg_*.sql` | rename/cast/standardize 1:1 từ staging tables |
 | `dbt/models/staging/_staging_models.yml` | docs + generic tests của staging contract |
 | `dbt/models/intermediate/int_*.sql` | reusable business joins/aggregations |
@@ -77,7 +78,7 @@ database, dbt executable, Spark gateway và producer theo dependency.
 | `dbt/models/marts/dim_*.sql` | consumer-facing dimensions |
 | `dbt/models/marts/fact_sales.sql` | incremental fact ở order-item grain |
 | `dbt/models/marts/daily_sales.sql` | incremental daily aggregate |
-| `dbt/models/marts/_marts_models.yml` | mart contract và generic tests |
+| `dbt/models/marts/_marts_models.yml` | enforced column/type contracts + generic tests |
 | `dbt/tests/**/*.sql` | singular tests trả về failure rows |
 
 Naming convention:
@@ -137,16 +138,20 @@ custom broker code.
 | --- | --- |
 | `cdc/bootstrap.py` | tạo/rotate replication role, publication và PUT connector config |
 | `cdc/verify_cdc.py` | kiểm tra end-to-end `c/u/d` + delete tombstone |
+| `cdc/materialize_customers.py` | Avro consumer, idempotent Bronze và ordered Silver apply |
+| `cdc/reconcile_customers.py` | FULL OUTER JOIN source/current reconciliation |
+| `cdc/verify_materialization.py` | functional create/update/delete proof |
+| `schema_registry/verify_contract.py` | read-only compatibility positive/negative test |
 
 Debezium không nằm trong Airflow DAG. Nó là long-running Kafka Connect source
-connector đọc PostgreSQL WAL; Airflow batch extractor vẫn là owner của staging
-cho tới bước Bronze/Silver cutover.
+connector đọc PostgreSQL WAL; customer materializer là single writer của Silver.
+Airflow chỉ còn polling bốn entity batch.
 
 ## 9. CI
 
 | File | Vai trò |
 | --- | --- |
-| `.github/workflows/dbt-ci.yml` | dựng PostgreSQL nhỏ, build hai lần, mutate, assert incremental |
+| `.github/workflows/dbt-ci.yml` | slim PR state/defer; full main replay/mutation/assertion |
 | `.github/workflows/platform-ci.yml` | compile Python, validate config, unit test Spark, build images |
 
 CI dùng fixture nhỏ để kiểm tra logic nhanh; end-to-end baseline lớn vẫn được

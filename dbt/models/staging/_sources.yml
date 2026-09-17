@@ -5,8 +5,6 @@ sources:
     description: "{{ doc('staging_source') }}"
     schema: staging
     tables:
-      - name: customers
-        description: Staging customers
       - name: products
         description: Staging products
       - name: orders
@@ -15,4 +13,15 @@ sources:
         description: Staging order_items
       - name: payments
         description: Staging payments
-        
+
+  - name: cdc_silver
+    description: >
+      Customer current state materialized continuously from Debezium Avro
+      events. Deletes are excluded from customers_current but retained as
+      tombstones in cdc_silver.customers for audit and replay.
+    schema: cdc_silver
+    tables:
+      - name: customers_current
+        description: >
+          One live row per customer after ordered r/c/u/d application. This is
+          the authoritative dbt source after the CDC ownership cutover.

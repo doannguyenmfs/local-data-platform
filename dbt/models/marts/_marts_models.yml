@@ -6,17 +6,25 @@ models:
     description: >
       Current-state product dimension used by analytical models.
       Grain: one row per product.
+    config:
+      # A public mart is an API for BI/consumers. Enforced contracts fail the
+      # build before replacing the relation if SQL drifts from declared shape.
+      contract:
+        enforced: true
     columns:
       - name: product_id
+        data_type: uuid
         description: Stable business identifier of the product.
         data_tests:
           - unique
           - not_null
       - name: name
+        data_type: text
         description: Current product name.
         data_tests:
           - not_null
       - name: category
+        data_type: text
         description: Current product category.
         data_tests:
           - not_null
@@ -34,59 +42,75 @@ models:
               config:
                 severity: warn
       - name: price
+        data_type: numeric(12, 2)
         description: Current catalog price of the product.
         data_tests:
           - not_null
 
       - name: created_at
+        data_type: timestamptz
         description: Timestamp when the product was created in the source system.
 
       - name: updated_at
+        data_type: timestamptz
         description: Timestamp of the latest source-side product change.
 
   - name: dim_customer
     description: >
       Type-2 slowly changing customer dimension built from snap_customers.
       Grain: one row per customer version.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: customer_sk
+        data_type: text
         description: Unique surrogate key identifying one customer version.
         data_tests:
           - unique
           - not_null
       - name: customer_id
+        data_type: uuid
         description: Stable business identifier shared by customer versions.
         data_tests:
           - not_null
 
       - name: first_name
+        data_type: text
         description: Customer first name for this historical version.
 
       - name: last_name
+        data_type: text
         description: Customer last name for this historical version.
 
       - name: email
+        data_type: text
         description: Customer email address for this historical version.
 
       - name: valid_from
+        data_type: timestamptz
         description: Inclusive timestamp when this version became effective.
         data_tests:
           - not_null
 
       - name: valid_to
+        data_type: timestamptz
         description: >
           Exclusive timestamp when this version stopped being effective;
           null for the currently active version.
 
       - name: is_current
+        data_type: boolean
         description: Indicates whether this is the currently effective version.
         data_tests:
           - not_null
 
       - name: created_at
+        data_type: timestamptz
         description: Timestamp when the customer was created in the source system.
 
       - name: updated_at
+        data_type: timestamptz
         description: Source effective-change timestamp for this customer version.
 
   - name: fact_sales
@@ -94,20 +118,26 @@ models:
       Order-item-level sales fact enriched with the customer version
       effective at the order time.
       Grain: one row per order item.
+    config:
+      contract:
+        enforced: true
 
     columns:
       - name: order_item_id
+        data_type: uuid
         description: Unique identifier establishing the fact grain.
         data_tests:
           - not_null
           - unique
 
       - name: order_id
+        data_type: uuid
         description: Order containing the item.
         data_tests:
           - not_null
 
       - name: customer_sk
+        data_type: text
         description: Surrogate key of the customer version resolved at order time.
         data_tests:
           - not_null
@@ -117,11 +147,13 @@ models:
                 field: customer_sk
 
       - name: customer_id
+        data_type: uuid
         description: Stable customer business identifier retained for traceability.
         data_tests:
           - not_null
 
       - name: product_id
+        data_type: uuid
         description: Product associated with the sold item.
         data_tests:
           - not_null
@@ -131,34 +163,41 @@ models:
                 field: product_id
 
       - name: order_date
+        data_type: timestamptz
         description: Timestamp at which the order occurred.
         data_tests:
           - not_null
 
       - name: previous_order_date
+        data_type: timestamptz
         description: >
           Previous business timestamp when an incremental update moves an
           order item to another day. Used to repair both daily aggregates.
 
       - name: order_status
+        data_type: text
         description: Operational status of the order.
 
       - name: quantity
+        data_type: integer
         description: Quantity sold for the order item.
         data_tests:
           - not_null
 
       - name: unit_price
+        data_type: numeric(12, 2)
         description: Product price recorded at transaction time.
         data_tests:
           - not_null
 
       - name: sales_amount
+        data_type: numeric(14, 2)
         description: Quantity multiplied by transaction unit price.
         data_tests:
           - not_null
 
       - name: payment_status
+        data_type: text
         description: Derived payment status of the associated order.
         data_tests:
           - not_null
@@ -170,14 +209,17 @@ models:
                   - unpaid
 
       - name: payment_attempt_count
+        data_type: bigint
         description: Number of payment attempts recorded for the order.
 
       - name: source_loaded_at
+        data_type: timestamptz
         description: Latest relevant staging load timestamp for incremental processing.
         data_tests:
           - not_null
 
       - name: customer_key_resolution
+        data_type: text
         description: >
           Method used to resolve the customer version. as_of is an exact
           temporal match; earliest_available is the initial-history fallback.
@@ -193,35 +235,44 @@ models:
     description: >
       Daily sales aggregate derived from fact_sales.
       Grain: one row per sales date.
+    config:
+      contract:
+        enforced: true
 
     columns:
       - name: sales_date
+        data_type: date
         description: Calendar date on which the orders occurred.
         data_tests:
           - not_null
           - unique
 
       - name: total_orders
+        data_type: bigint
         description: Number of distinct orders placed on the date.
         data_tests:
           - not_null
 
       - name: total_items
+        data_type: bigint
         description: Total quantity of items sold on the date.
         data_tests:
           - not_null
 
       - name: total_sales
+        data_type: numeric(16, 2)
         description: Gross sales amount for all order items on the date.
         data_tests:
           - not_null
 
       - name: paid_sales
+        data_type: numeric(16, 2)
         description: Sales amount belonging to orders classified as paid.
         data_tests:
           - not_null
 
       - name: max_source_loaded_at
+        data_type: timestamptz
         description: Incremental high-water mark of the facts represented by the day.
         data_tests:
           - not_null

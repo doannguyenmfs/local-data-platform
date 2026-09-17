@@ -129,14 +129,20 @@ docker compose \
 
 ## Schema evolution
 
-`schema_version` nằm trong envelope để consumer route/validate. Quy tắc an toàn:
+Order-event demo vẫn dùng JSON và `schema_version` trong envelope để
+consumer route/validate. Quy tắc an toàn:
 
 - Chỉ thêm optional field cho thay đổi backward-compatible.
 - Không đổi ý nghĩa/type của field cũ tại chỗ.
 - Breaking change tạo schema version mới và consumer phải hỗ trợ song song
   trong giai đoạn migration.
-- JSON thuận tiện để học nhưng production thường dùng Schema Registry với
-  Avro/Protobuf/JSON Schema để enforce compatibility tập trung.
+- JSON thuận tiện để học nhưng không tự enforce compatibility tập trung.
+
+Customer CDC đã đi xa hơn phần demo này: Debezium dùng Avro converter,
+schema được version trong Apicurio Registry và policy
+`BACKWARD_TRANSITIVE` chặn thay đổi phá vỡ. Vì vậy không nên suy rộng
+nhận xét “project đang dùng JSON” cho luồng CDC. Xem
+`13-schema-registry-avro.md` và `14-cdc-bronze-silver-cutover.md`.
 
 Consumer hiện chỉ chấp nhận `event_type='order.upserted'` và
 `schema_version=1`. Event parse lỗi/thiếu key/version khác được giữ nguyên raw

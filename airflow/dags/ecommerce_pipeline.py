@@ -34,7 +34,6 @@ DBT_TARGET = os.getenv("DBT_TARGET", "dev")
 SPARK_GATEWAY_URL = os.getenv("SPARK_GATEWAY_URL", "http://spark-gateway:8090")
 ORDER_PRODUCER = "/opt/airflow/kafka-producer/publish_orders.py"
 PIPELINE_NAMES = {
-    "staging_customers",
     "staging_products",
     "staging_orders",
     "staging_order_items",
@@ -189,22 +188,6 @@ def ecommerce_pipeline():
             raise ValueError("backfill_start must be earlier than backfill_end")
 
     @task(retries=2)
-    def extract_customers(**context):
-        """Load customer current state into its primary-keyed staging table."""
-        params = context["params"]
-        return extract_incremental(
-            "customers",
-            "customer_id",
-            [
-                "customer_id", "first_name", "last_name", "email",
-                "created_at", "updated_at",
-            ],
-            run_mode=params["run_mode"],
-            backfill_start=params["backfill_start"],
-            backfill_end=params["backfill_end"],
-        )
-
-    @task(retries=2)
     def extract_products(**context):
         """Load the analytical subset of the product catalog."""
         params = context["params"]
@@ -281,7 +264,9 @@ def ecommerce_pipeline():
         )
         query = """
             SELECT
-                (SELECT COUNT(*) FROM staging.customers) AS customers,
+                -- Customer is continuously owned by CDC Silver; the other
+                -- entities still use this DAG's watermark polling path.
+                (SELECT COUNT(*) FROM cdc_silver.customers_current) AS customers,
                 (SELECT COUNT(*) FROM staging.products) AS products,
                 (SELECT COUNT(*) FROM staging.orders) AS orders,
                 (SELECT COUNT(*) FROM staging.order_items) AS order_items,
@@ -296,7 +281,7 @@ def ecommerce_pipeline():
             "payments": row[4],
         }
         failures = [
-            f"staging.{table}: row count = {count}"
+            f"{table}: row count = {count}"
             for table, count in counts.items()
             if count == 0
         ]
@@ -308,7 +293,12 @@ def ecommerce_pipeline():
             )
         print("Data validation passed:")
         for table, count in counts.items():
-            print(f"  - staging.{table}: {count:,} rows")
+            relation = (
+                "cdc_silver.customers_current"
+                if table == "customers"
+                else f"staging.{table}"
+            )
+            print(f"  - {relation}: {count:,} rows")
 
     @task(retries=2)
     def validate_relationships():
@@ -320,7 +310,7 @@ def ecommerce_pipeline():
             "orders_without_customer": """
                 SELECT COUNT(*)
                 FROM staging.orders o
-                LEFT JOIN staging.customers c
+                LEFT JOIN cdc_silver.customers_current c
                     ON c.customer_id = o.customer_id
                 WHERE c.customer_id IS NULL
             """,
@@ -445,9 +435,10 @@ def ecommerce_pipeline():
     def advance_watermarks(**context):
         """Commit source windows only after all mandatory sinks succeed.
 
-        Requiring all five candidates prevents a partially extracted batch from
+        Requiring all four batch candidates prevents a partial extraction from
         moving only some cursors.  Backfill deliberately leaves scheduled
-        progress untouched because its window may be historical.
+        progress untouched because its window may be historical. Customer has
+        no candidate here: Kafka consumer offsets are its progress contract.
         """
         if context["params"]["run_mode"] == "backfill":
             print("Backfill completed; incremental watermarks remain unchanged")
@@ -492,7 +483,6 @@ def ecommerce_pipeline():
     # their Python bodies.  The arrows below form a fan-out/fan-in graph:
     # config -> parallel extract -> validations -> parallel sinks -> commit.
     run_config = validate_run_config()
-    customers = extract_customers()
     products = extract_products()
     orders = extract_orders()
     order_items = extract_order_items()
@@ -507,7 +497,6 @@ def ecommerce_pipeline():
     watermarks = advance_watermarks()
 
     run_config >> [
-        customers,
         products,
         orders,
         order_items,

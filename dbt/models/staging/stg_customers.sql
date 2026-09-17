@@ -1,7 +1,8 @@
 {#
-  Thin source-conformed view: keep one customer row per staging business key.
-  `source()` records that Airflow/PostgreSQL, not dbt, owns the physical table.
-  Business joins/history deliberately happen in later layers.
+  Thin source-conformed view over CDC Silver current state. `source()` records
+  that the CDC materializer, not dbt, owns the physical state. This model keeps
+  the familiar stg_* naming contract so downstream refs do not know whether a
+  source arrived through batch polling or CDC.
 #}
 {{ config(materialized='view') }}
 
@@ -13,4 +14,4 @@ select
     created_at,
     updated_at,
     loaded_at
-from {{ source('staging', 'customers') }}
+from {{ source('cdc_silver', 'customers_current') }}

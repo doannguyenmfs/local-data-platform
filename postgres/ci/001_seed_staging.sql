@@ -2,13 +2,21 @@
 -- post-mutation assertions possible while keeping the workflow fast.
 BEGIN;
 
-INSERT INTO staging.customers (
+-- Customer no longer comes from Airflow's polling staging table. This fixture
+-- seeds the exact Silver contract dbt reads after CDC cutover.
+INSERT INTO cdc_silver.customers (
     customer_id,
     first_name,
     last_name,
     email,
     created_at,
-    updated_at
+    updated_at,
+    source_operation,
+    source_lsn,
+    source_ts_ms,
+    kafka_topic,
+    kafka_partition,
+    kafka_offset
 )
 VALUES
     (
@@ -17,7 +25,9 @@ VALUES
         'Nguyen',
         'an@example.com',
         '2026-01-01 08:00:00+00',
-        '2026-01-01 08:00:00+00'
+        '2026-01-01 08:00:00+00',
+        'r', 1, 1767254400000,
+        'ci.public.customers', 0, 0
     ),
     (
         '00000000-0000-0000-0000-000000000002',
@@ -25,8 +35,32 @@ VALUES
         'Tran',
         'binh@example.com',
         '2026-01-01 09:00:00+00',
-        '2026-01-01 09:00:00+00'
+        '2026-01-01 09:00:00+00',
+        'r', 2, 1767258000000,
+        'ci.public.customers', 0, 1
+    ),
+    (
+        -- Customer 3 deliberately has no orders, matching the OLTP foreign-key
+        -- rule that permits hard delete only when no order references the key.
+        '00000000-0000-0000-0000-000000000003',
+        'Chi',
+        'Le',
+        'chi@example.com',
+        '2026-01-01 10:00:00+00',
+        '2026-01-01 10:00:00+00',
+        'r', 3, 1767261600000,
+        'ci.public.customers', 0, 2
     );
+
+-- The baseline manifest on a pull request comes from main and can still point
+-- at the pre-cutover polling source. Keeping this tiny compatibility fixture
+-- allows CI to build baseline state; current code itself reads CDC Silver.
+INSERT INTO staging.customers (
+    customer_id, first_name, last_name, email, created_at, updated_at
+)
+SELECT
+    customer_id, first_name, last_name, email, created_at, updated_at
+FROM cdc_silver.customers_current;
 
 INSERT INTO staging.products (
     product_id,

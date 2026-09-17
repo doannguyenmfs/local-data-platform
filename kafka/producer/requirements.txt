@@ -1,2 +1,5 @@
-confluent-kafka==2.15.1
+# `avro` installs both the Avro codec and Schema Registry HTTP dependencies.
+# Keeping the extra on the same pinned client prevents a deceptively successful
+# base import followed by a runtime `certifi/httpx` failure in CDC consumers.
+confluent-kafka[avro]==2.15.1
 psycopg[binary]==3.3.5

@@ -140,15 +140,12 @@ dbt/.venv/bin/dbt build \
 
 - Incremental filter dùng toán tử `>` vì một dbt model build là transaction:
   hoặc cả batch merge thành công, hoặc rollback.
-- `on_schema_change='sync_all_columns'` cho phép hai mart nhận cột mới trong lần
-  nâng cấp đã biết. Nó không thay data contract review: rename/drop/type change
-  vẫn phải test và rollout có chủ đích. Nếu tổ chức muốn drift luôn dừng, đổi
-  policy về `fail` sau khi migration hoàn tất.
-- Incremental không tự giải quyết hard delete ở source. Debezium hiện đã
-  **capture và lưu** customer delete trong raw Kafka topic, nhưng chưa có
-  consumer **apply** delete đó vào staging/mart. Vì vậy dbt vẫn chưa thấy
-  customer biến mất. Late data cũ hơn Airflow watermark vẫn cần explicit
-  backfill hoặc một ingestion contract mới.
+- `on_schema_change='fail'` phối hợp enforced model contract: mart không tự đổi
+  public interface. Column change cần YAML/SQL/migration được review.
+- Incremental mart không tự giải quyết hard delete, nhưng customer upstream đã
+  cung cấp tín hiệu đúng: CDC Silver current ẩn deleted key và dbt snapshot
+  invalidate version mở. Late data của bốn table watermark vẫn cần explicit
+  backfill hoặc ingestion contract mới.
 - `--full-refresh` là thao tác có chủ đích, không dùng trong DAG hằng ngày.
 
 ## Vì sao thiết kế này thay vì các lựa chọn khác?

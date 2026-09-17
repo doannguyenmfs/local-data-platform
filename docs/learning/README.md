@@ -31,9 +31,12 @@ biệt rõ delete mới được **capture** hay đã được **apply**.
 | 10 | [Observability](10-observability.md) | health, freshness, metric, alert và data test khác nhau thế nào? |
 | 11 | [Verification](11-verification-and-tradeoffs.md) | bằng chứng nào đủ để tin một platform end-to-end? |
 | 12 | [CDC/Debezium](12-cdc-debezium.md) | WAL, LSN, publication, slot, snapshot và delete event phối hợp thế nào? |
+| 13 | [Schema Registry/Avro](13-schema-registry-avro.md) | schema ID, subject, reference và compatibility gate bảo vệ consumer ra sao? |
+| 14 | [CDC Bronze/Silver/cutover](14-cdc-bronze-silver-cutover.md) | capture thành current state/delete và đổi owner không dual-writer thế nào? |
+| 15 | [dbt contracts/slim CI](15-dbt-contracts-slim-ci.md) | contract khác test và manifest state/defer rút ngắn PR ra sao? |
 
 `00-beginner-map.md` không phải một level mới. Nó là bản đồ để tra cứu trong lúc
-đọc Level 5–12.
+đọc Level 5–15.
 
 Đọc [Kiến trúc hệ thống](../architecture.md) sau Level 4 để gắn khái niệm vào
 container/node/network/volume. Giữ [Bản đồ code](../code-map.md) mở bên cạnh IDE
@@ -43,8 +46,8 @@ khi đọc implementation.
 
 ### Chuẩn bị phỏng vấn Analytics Engineer
 
-Đọc Level 3 → 5 → 11. Tập trung grain, SCD2, dbt layering, generic/singular
-tests, incremental MERGE và cách chứng minh idempotency.
+Đọc Level 3 → 5 → 11 → 15. Tập trung grain, SCD2, dbt layering,
+generic/singular tests, contracts, incremental MERGE và idempotency.
 
 ### Chuẩn bị phỏng vấn Data Engineer batch
 
@@ -53,8 +56,8 @@ Spark execution, Iceberg metadata/transaction và failure recovery.
 
 ### Chuẩn bị phỏng vấn Streaming
 
-Đọc Level 4 → 7 → 8 → 9 → 10 → 12. Tập trung stable event identity, Kafka
-ordering, checkpoint crash window, MERGE sink, DLQ, WAL/LSN và slot retention.
+Đọc Level 4 → 7 → 8 → 9 → 10 → 12 → 13 → 14. Tập trung stable event
+identity, Kafka ordering, schema compatibility, WAL/LSN, replay và delete apply.
 
 ### Muốn vận hành project ngay
 
@@ -87,6 +90,10 @@ Cho mỗi level:
 - Level 11: chạy release checklist mà không xóa volume/checkpoint.
 - Level 12: chạy CDC smoke test, đọc đủ `c/u/d/tombstone`, rồi restart Connect
   và chứng minh slot/offset tiếp tục thay vì snapshot lại.
+- Level 13: gửi proposed breaking schema vào compatibility endpoint và chứng
+  minh bị từ chối mà không tạo version rác.
+- Level 14: chạy materialization test và reconcile source/Silver sau restart.
+- Level 15: so manifest baseline/current và dự đoán node `state:modified+`.
 
 Không thực hiện destructive exercise trên dữ liệu cần giữ. `down -v`, schema
 reset và xóa checkpoint chỉ dùng sau khi đã hiểu state nào sẽ mất.

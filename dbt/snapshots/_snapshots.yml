@@ -19,6 +19,10 @@ snapshots:
       # change. loaded_at is intentionally excluded so every Airflow retry does
       # not manufacture a new customer version.
       strategy: check
+      # When a CDC delete removes a key from customers_current, invalidate the
+      # open snapshot version. History remains queryable, but no version stays
+      # falsely current after the source entity has been deleted.
+      hard_deletes: invalidate
       check_cols:
         - first_name
         - last_name

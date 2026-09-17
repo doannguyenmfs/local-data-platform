@@ -14,10 +14,10 @@ nhớ option của từng tool. Hãy luôn trả lời bốn câu cho mỗi bư�
 ```text
 OLTP public.*
     │
-    ├─ Airflow đọc cửa sổ updated_at
+    ├─ Airflow đọc cửa sổ updated_at của 4 bảng batch
     │      └─ UPSERT vào staging.*
     │
-    ├─ dbt đọc staging
+    ├─ dbt đọc staging batch + CDC Silver customer
     │      ├─ view chuẩn hóa
     │      ├─ snapshot lưu lịch sử customer
     │      └─ MERGE fact/daily mart
@@ -29,7 +29,7 @@ OLTP public.*
     │      └─ Kafka ─► Spark stream ─► Iceberg history/current/DLQ
     │
     └─ PostgreSQL WAL
-           └─ Debezium ─► raw CDC topic của customers
+           └─ Debezium/Avro ─► Bronze ─► Silver customer current/delete
 
 mọi component ─► platform exporter ─► Prometheus ─► Grafana/Alertmanager
 ```
@@ -37,7 +37,7 @@ mọi component ─► platform exporter ─► Prometheus ─► Grafana/Alertm
 Hai đường cuối dễ bị nhầm:
 
 - pipeline Kafka `order-events` là event do project chủ động tạo từ staging;
-- topic `ecommerce_cdc.public.customers` là thay đổi database do Debezium đọc
+- topic `ecommerce_cdc_avro.public.customers` là thay đổi database do Debezium đọc
   trực tiếp từ WAL.
 
 ## 2. `capture`, `store` và `apply` không phải một việc
@@ -48,16 +48,16 @@ Hai đường cuối dễ bị nhầm:
 | --- | --- | --- |
 | Capture | Nhìn thấy thay đổi ở nguồn | Có: Debezium đọc delete từ WAL |
 | Store | Ghi thay đổi bền vững để có thể replay | Có: event `d` và tombstone ở Kafka |
-| Apply/materialize | Dùng event sửa/xóa state ở đích | Chưa: chưa có CDC consumer cho staging/dim |
-| Cut over | Chuyển ownership từ pipeline cũ sang pipeline mới | Chưa: Airflow vẫn sở hữu `staging.customers` |
+| Apply/materialize | Dùng event sửa/xóa state ở đích | Có: Bronze/Silver consumer apply theo LSN/offset |
+| Cut over | Chuyển ownership từ pipeline cũ sang pipeline mới | Có: dbt đọc Silver; Airflow customer poller đã retire |
 
-Vì vậy câu đúng là: **source delete đã được capture và lưu, nhưng chưa được
-apply vào `staging.customers` hoặc `dim_customer`.** Nếu truy vấn hai relation
-đó ngay sau một source delete, customer vẫn có thể còn hiện diện.
+Vì vậy câu đúng hiện tại là: **source delete được capture, lưu ở Bronze, apply
+thành Silver tombstone và đóng current `dim_customer` ở lần dbt build kế tiếp.**
 
 Không cho Debezium ghi thẳng vào staging là quyết định có chủ đích. Nếu Airflow
 backfill và CDC cùng là writer, backfill có thể insert lại row vừa bị CDC xóa.
-Project cần Bronze/Silver consumer, đối soát và cutover ownership trước.
+Project đã tạo namespace Bronze/Silver riêng, đối soát rồi cutover ownership;
+legacy `staging.customers` được giữ làm rollback evidence nhưng không còn writer.
 
 ## 3. Sáu loại state đang tồn tại
 
@@ -95,19 +95,19 @@ distributed transaction bao trùm PostgreSQL, Kafka và object storage.
 
 ## 5. Một delete đi qua hệ thống như thế nào?
 
-Với `public.customers`, hiện có hai đường khác nhau:
+Với `public.customers`, đường owner hiện tại là:
 
 ```text
 DELETE source customer
-    ├─ Airflow polling: không nhìn thấy row đã biến mất
-    └─ WAL/Debezium: event d ─► tombstone ─► raw Kafka topic
+    └─ WAL/Debezium: d + tombstone ─► Bronze ─► Silver is_deleted=true
+                                             └─ dbt snapshot invalidate
 ```
 
 - Event `d` mang nghĩa nghiệp vụ: row đã bị xóa.
 - Tombstone có cùng Kafka key và value `null`; nó phục vụ log compaction.
-- Không record nào tự động xóa staging/dim chỉ vì tombstone đã tồn tại.
-- dbt snapshot chỉ có thể invalidate hard delete nếu relation đầu vào của nó đã
-  phản ánh việc row biến mất. Staging hiện chưa phản ánh tín hiệu đó.
+- Event `d`, không phải Kafka tombstone, đặt Silver `is_deleted=true`.
+- `customers_current` ẩn key; dbt snapshot `hard_deletes: invalidate` đóng
+  version mở mà không xóa lịch sử.
 
 ## 6. `incremental` có ba nghĩa khác nhau trong project
 

@@ -10,6 +10,7 @@ on:
       - "spark/**"
       - "kafka/**"
       - "cdc/**"
+      - "schema_registry/**"
       - "monitoring/**"
       - "docker-compose.yml"
       - ".env.example"
@@ -21,6 +22,7 @@ on:
       - "spark/**"
       - "kafka/**"
       - "cdc/**"
+      - "schema_registry/**"
       - "monitoring/**"
       - "docker-compose.yml"
       - ".env.example"
@@ -57,6 +59,7 @@ jobs:
             spark/gateway \
             kafka/producer \
             cdc \
+            schema_registry \
             monitoring
 
       - name: Validate Compose

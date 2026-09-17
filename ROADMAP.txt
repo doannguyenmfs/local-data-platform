@@ -1,6 +1,6 @@
 # LOCAL DATA PLATFORM — ROADMAP
 
-Trạng thái: ADVANCED IN PROGRESS (core complete; CDC capture complete)
+Trạng thái: P0 COMPLETE (schema contracts + CDC end-to-end complete)
 Xác minh end-to-end gần nhất: 2026-09-17
 
 | Level | Chủ đề | Kết quả |
@@ -17,8 +17,11 @@ Xác minh end-to-end gần nhất: 2026-09-17
 | 10 | Observability | semantic metrics, Prometheus, alerts, Grafana |
 | 11 | Delivery | container validation, GitHub Actions, runbook |
 | 12 | CDC capture | PostgreSQL WAL, Debezium, slot/publication, c/u/d/tombstone |
+| 13 | Event contracts | Apicurio Registry, Avro, backward-transitive compatibility |
+| 14 | CDC materialization | Bronze audit, Silver current/delete, reconcile và cutover |
+| 15 | Safe dbt delivery | enforced mart contracts, slim PR CI, full main proof |
 
-Tài liệu học tương ứng nằm trong `docs/learning/01-*.md` đến `12-*.md`.
+Tài liệu học tương nằm trong `docs/learning/01-*.md` đến `15-*.md`.
 Topology logical/physical nằm tại `docs/architecture.md`; trách nhiệm từng file
 nằm tại `docs/code-map.md`; thao tác vận hành nằm tại `docs/runbook.md`.
 Danh sách capability hiện có và advanced backlog chi tiết nằm tại
@@ -31,7 +34,7 @@ extract -> validate -> [dbt, Iceberg batch, Kafka publish] -> advance watermark
                                       Kafka -> Spark stream -> Iceberg
 weekly maintenance DAG -> compact files + expire old Iceberg snapshots
 all components -> exporter -> Prometheus -> Grafana / Alertmanager
-PostgreSQL WAL -> Debezium Connect -> compacted raw CDC topics
+PostgreSQL WAL -> Debezium -> Avro/Registry -> Bronze -> Silver -> dbt SCD2
 ```
 
 ## Definition of done
@@ -47,7 +50,9 @@ PostgreSQL WAL -> Debezium Connect -> compacted raw CDC topics
 - CI dựng môi trường tối thiểu, chạy test và build toàn bộ image.
 - Dashboard/alert theo dõi cả hạ tầng lẫn độ tươi dữ liệu.
 - CDC dùng replication role riêng, publication allow-list, durable slot/offset,
-  smoke test delete và alert WAL retention.
+  compatibility gate, idempotent Bronze/Silver, reconcile và delete apply.
+- Public dbt marts enforce column/type contract; PR CI dùng state/defer và main
+  vẫn chạy full idempotent + mutation test.
 - README và runbook đủ để khởi động, kiểm tra và phục hồi mà không đọc source.
 
 ## Deferred / accepted risks
@@ -60,15 +65,11 @@ lý bằng explicit backfill. CDC hiện capture mọi commit mới của custom
 phụ thuộc `updated_at`; các table batch còn lại vẫn cần ingestion timestamp,
 lookback window có dedupe hoặc mở rộng publication sau capacity review.
 
-### CDC materialization/cutover chưa thực hiện
+### CDC customer đã cut over, các entity khác vẫn là batch
 
-Hard delete customer đã có trong raw Kafka CDC topic nhưng chưa được áp vào
-`staging.customers`. Batch extractor vẫn là single writer của staging. Bước
-Bronze/Silver sẽ consume envelope, reconcile và cut over source ownership trước
-khi retire customer watermark; không chạy hai writer âm thầm trên cùng table.
-
-Vì vậy “Level 12 complete” nghĩa là capture/store/resume/observe đã xong, không
-có nghĩa delete đã materialize tới mọi downstream table.
+`customers` đã dùng CDC end-to-end và hard delete đóng current SCD2 version.
+`products`, `orders`, `order_items`, `payments` vẫn dùng daily watermark/backfill
+theo chủ đích; mở rộng publication cần capacity/schema/ownership review riêng.
 
 ### Local-only constraints
 
@@ -82,5 +83,5 @@ có nghĩa delete đã materialize tới mọi downstream table.
 ## Hướng phát triển sau project
 
 Advanced roadmap được ưu tiên và mô tả Definition of Done tại
-`docs/platform-capabilities.md`. Thứ tự gần nhất là Schema Registry/contracts,
-CDC Bronze/Silver/cutover, rồi external alerting/SLO, backup/DR và security.
+`docs/platform-capabilities.md`. P0 đã hoàn tất; thứ tự gần nhất là external
+alerting/SLO, backup/DR và security, sau đó lineage/logging/HA.

@@ -11,7 +11,7 @@ CI và observability.
 PostgreSQL source
        │
        ▼
-Airflow incremental extract ──► staging PostgreSQL
+Airflow incremental extract (4 batch tables) ──► staging PostgreSQL
        │                              │
        │                              ├──► dbt ──► analytics marts
        │                              │
@@ -21,14 +21,16 @@ Airflow incremental extract ──► staging PostgreSQL
        │                                             │
        └──── commit watermark ◄──────────────────────┘
 
-PostgreSQL WAL ──► Debezium Connect ──► raw CDC Kafka topics
+PostgreSQL WAL ─► Debezium ─► Avro/Registry ─► CDC Bronze ─► Silver current
+                                                               │
+                                                               └─► dbt customer SCD2
 
 Exporter ──► Prometheus ──► Grafana
                     └─────► Alertmanager
 ```
 
-Topology chi tiết gồm 29 service definitions, 19 container chạy dài hạn, 4 init
-job, 6 one-shot tools, network/port/volume và lý do chọn số node được mô tả tại
+Topology chi tiết gồm 35 service definitions, 21 container chạy dài hạn, 4 init
+job, 10 one-shot tools, network/port/volume và lý do chọn số node được mô tả tại
 [Kiến trúc hệ thống](docs/architecture.md). Tra cứu trách nhiệm từng file tại
 [Bản đồ code](docs/code-map.md). Để xem theo góc độ người dùng/operator thay vì
 theo component, đọc [Platform có thể làm gì?](docs/platform-capabilities.md).
@@ -48,6 +50,7 @@ không nhân đôi dữ liệu.
 | Spark job gateway | API allow-list cho Airflow | <http://localhost:8090/health> |
 | Kafka 4 | durable event log | `localhost:9092` |
 | Debezium Connect | PostgreSQL WAL CDC | <http://localhost:8083> |
+| Apicurio Registry | Avro schema/compatibility | <http://localhost:8084> |
 | MinIO | S3-compatible Iceberg warehouse | <http://localhost:9001> |
 | Prometheus | metric và alert rules | <http://localhost:9090> |
 | Alertmanager | nhóm/trạng thái alert | <http://localhost:9093> |
@@ -91,6 +94,15 @@ docker compose --profile '*' run --rm --no-deps iceberg-maintenance
 # Chứng minh CDC capture đủ create/update/delete/tombstone
 docker compose --profile '*' run --rm --no-deps cdc-smoke-test
 
+# Chứng minh compatibility policy và breaking schema bị từ chối
+docker compose --profile '*' run --rm schema-contract-test
+
+# Chứng minh CDC đã apply create/update/delete vào Bronze/Silver
+docker compose --profile '*' run --rm cdc-materialization-test
+
+# Đối soát toàn bộ source customer với Silver current state
+docker compose --profile '*' run --rm cdc-reconcile
+
 # Kiểm tra row count và business grain của các bảng Iceberg
 docker compose exec -T spark-gateway python3 -c \
   "import urllib.request; print(urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8090/jobs/validate-platform', method='POST'), timeout=3600).read().decode())"
@@ -120,6 +132,7 @@ python3 -m py_compile \
   airflow/dags/lakehouse_maintenance.py \
   kafka/producer/publish_orders.py \
   cdc/*.py \
+  schema_registry/*.py \
   monitoring/platform_exporter.py \
   spark/gateway/job_gateway.py \
   spark/jobs/*.py \
@@ -142,9 +155,9 @@ docker compose --profile '*' run --rm --no-deps \
   spark-submit --master 'local[2]' /opt/spark/tests/test_order_stream.py
 ```
 
-GitHub Actions gồm hai lớp: `dbt-ci.yml` dựng database tối thiểu rồi chứng minh
-incremental/idempotency; `platform-ci.yml` kiểm tra Compose, Python, monitoring
-config và build/test các container còn lại.
+GitHub Actions gồm hai lớp: PR dbt dùng baseline manifest + `state:modified+`
+và defer; main chạy full initial/idempotent/mutation proof. `platform-ci.yml`
+kiểm tra Compose, Python, monitoring config và build/test runtime image.
 
 ## Môi trường dbt
 
@@ -171,12 +184,15 @@ thành production deployment. Luôn truyền `--target` rõ ràng trong automati
 10. [Monitoring và alerting](docs/learning/10-observability.md)
 11. [System verification và production trade-offs](docs/learning/11-verification-and-tradeoffs.md)
 12. [CDC với PostgreSQL và Debezium](docs/learning/12-cdc-debezium.md)
-13. [Bản đồ nhập môn từ dbt incremental đến CDC](docs/learning/00-beginner-map.md)
-14. [Kiến trúc logical và physical](docs/architecture.md)
-15. [Bản đồ code theo file](docs/code-map.md)
-16. [Runbook vận hành](docs/runbook.md)
-17. [Roadmap và phạm vi](ROADMAP.txt)
-18. [Functional capabilities và advanced roadmap](docs/platform-capabilities.md)
+13. [Schema Registry và Avro](docs/learning/13-schema-registry-avro.md)
+14. [CDC Bronze/Silver và cutover](docs/learning/14-cdc-bronze-silver-cutover.md)
+15. [dbt contracts và slim CI](docs/learning/15-dbt-contracts-slim-ci.md)
+16. [Bản đồ nhập môn từ dbt incremental đến CDC](docs/learning/00-beginner-map.md)
+17. [Kiến trúc logical và physical](docs/architecture.md)
+18. [Bản đồ code theo file](docs/code-map.md)
+19. [Runbook vận hành](docs/runbook.md)
+20. [Roadmap và phạm vi](ROADMAP.txt)
+21. [Functional capabilities và advanced roadmap](docs/platform-capabilities.md)
 
 ## Phạm vi production-shaped
 

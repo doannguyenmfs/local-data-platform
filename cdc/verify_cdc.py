@@ -10,13 +10,15 @@ into staging or dbt, so it must not be interpreted as downstream delete APPLY.
 
 from __future__ import annotations
 
-import json
 import os
 import time
 import uuid
 
 import psycopg
 from confluent_kafka import Consumer, KafkaError, TopicPartition
+from confluent_kafka.schema_registry import SchemaRegistryClient
+from confluent_kafka.schema_registry.avro import AvroDeserializer
+from confluent_kafka.serialization import MessageField, SerializationContext
 
 
 def required(name: str) -> str:
@@ -93,23 +95,29 @@ def mutate_customer(customer_id: uuid.UUID) -> None:
         connection.commit()
 
 
-def is_target_key(raw_key: bytes | None, customer_id: uuid.UUID) -> bool:
-    """Match a Debezium JSON key to the isolated test UUID.
-
-    JSON Converter normally wraps data as ``schema`` + ``payload``. Supporting
-    an unwrapped dict too keeps this diagnostic compatible if a later migration
-    moves schemas to a registry and changes the converter representation.
-    """
+def is_target_key(
+    raw_key: bytes | None,
+    customer_id: uuid.UUID,
+    topic: str,
+    deserializer: AvroDeserializer,
+) -> bool:
+    """Decode a registry-backed Avro key and match the isolated test UUID."""
     if raw_key is None:
         return False
-    key = json.loads(raw_key.decode("utf-8"))
-    key = key.get("payload", key)
-    return key.get("customer_id") == str(customer_id)
+    key = deserializer(raw_key, SerializationContext(topic, MessageField.KEY))
+    return str(key.get("customer_id")) == str(customer_id)
 
 
 def main() -> None:
     customer_id = uuid.uuid4()
     topic = f"{required('CDC_TOPIC_PREFIX')}.public.customers"
+    # Apicurio exposes the Confluent-compatible API, so the standard Python
+    # deserializer can resolve schema IDs embedded in the Avro wire payload.
+    registry_client = SchemaRegistryClient(
+        {"url": required("SCHEMA_REGISTRY_CCOMPAT_URL")}
+    )
+    key_deserializer = AvroDeserializer(registry_client)
+    value_deserializer = AvroDeserializer(registry_client)
     consumer = Consumer(
         {
             "bootstrap.servers": required("KAFKA_BOOTSTRAP_SERVERS"),
@@ -135,13 +143,17 @@ def main() -> None:
                 if message.error().code() == KafkaError._PARTITION_EOF:
                     continue
                 raise RuntimeError(message.error())
-            if not is_target_key(message.key(), customer_id):
+            if not is_target_key(
+                message.key(), customer_id, topic, key_deserializer
+            ):
                 continue
             if message.value() is None:
                 saw_tombstone = True
             else:
-                event = json.loads(message.value().decode("utf-8"))
-                event = event.get("payload", event)
+                event = value_deserializer(
+                    message.value(),
+                    SerializationContext(topic, MessageField.VALUE),
+                )
                 operation = event.get("op")
                 if operation in {"c", "u", "d"}:
                     operations.append(operation)

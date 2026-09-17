@@ -23,17 +23,18 @@ docker compose ps
 
 Trạng thái mong đợi:
 
-- PostgreSQL, Redis, Kafka, Debezium Connect và MinIO healthy.
+- PostgreSQL, Redis, Kafka, Schema Registry, Debezium Connect và MinIO healthy.
 - `airflow-init`, `minio-init`, `kafka-init`, `cdc-bootstrap` exited với code 0; đây là đúng vì
   chúng là init job.
-- Airflow services, Spark master/worker/gateway, order stream, exporter,
-  Prometheus, Alertmanager và Grafana đang running.
+- Airflow services, Spark master/worker/gateway, order stream, customer CDC
+  materializer, exporter, Prometheus, Alertmanager và Grafana đang running.
 
 Kiểm tra nhanh:
 
 ```bash
 curl --fail http://localhost:8090/health
-curl --fail http://localhost:8083/connectors/ecommerce-postgres-cdc/status
+curl --fail http://localhost:8083/connectors/ecommerce-postgres-cdc-avro/status
+curl --fail http://localhost:8084/apis/ccompat/v7/config
 curl --fail http://localhost:9100/metrics
 curl --fail http://localhost:9090/-/healthy
 curl --fail http://localhost:3000/api/health
@@ -51,7 +52,7 @@ Thứ tự phải là:
 
 ```text
 validate config
-  -> extract song song
+  -> 4 batch extract song song (customer do CDC Silver sở hữu)
   -> record-count validation
   -> relationship validation
   -> dbt + Iceberg + Kafka song song
@@ -90,7 +91,7 @@ Watermark/candidate (shell hiện tại phải có biến từ `.env`):
 set -a; source .env; set +a
 docker compose exec -T postgres psql \
   -U "$ECOMMERCE_POSTGRES_USER" -d "$ECOMMERCE_POSTGRES_DB" \
-  -c "select pipeline_name, watermark_value, candidate_value, updated_at from metadata.etl_watermark order by 1;"
+  -c "select pipeline_name, active, watermark_value, candidate_value, updated_at from metadata.etl_watermark order by 1;"
 ```
 
 Kafka:
@@ -105,17 +106,29 @@ docker compose exec -T kafka \
 CDC connector và PostgreSQL slot:
 
 ```bash
-curl --fail http://localhost:8083/connectors/ecommerce-postgres-cdc/status
+curl --fail http://localhost:8083/connectors/ecommerce-postgres-cdc-avro/status
 
 docker compose exec -T postgres psql \
   -U "$ECOMMERCE_POSTGRES_USER" -d "$ECOMMERCE_POSTGRES_DB" \
   -c "select slot_name, active, restart_lsn, confirmed_flush_lsn, pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) as retained_bytes from pg_replication_slots;"
 
-docker compose --profile '*' run --rm --no-deps cdc-smoke-test
+docker compose --profile '*' run --rm cdc-smoke-test
+docker compose --profile '*' run --rm schema-contract-test
+docker compose --profile '*' run --rm cdc-materialization-test
+docker compose --profile '*' run --rm cdc-reconcile
 ```
+
+Danh sách connector bình thường chỉ có
+`ecommerce-postgres-cdc-avro`; slot tương ứng là
+`ecommerce_cdc_avro_slot`. Connector/slot JSON cũ đã retire sau cutover. Không
+xóa slot đang active chỉ để dọn alert: phải chứng minh connector đã
+ngừng, luồng thay thế reconcile bằng 0 và retention evidence còn đủ.
 
 Smoke test phải thấy `operations=c,u,d; delete_tombstone=true`. Nó dùng customer
 UUID riêng và delete source row sau cùng.
+
+Materialization test phải thấy `Bronze=c,u,d,t; Silver delete applied`;
+reconcile phải có `differences=0, duplicate_offsets=0`.
 
 Kiểm tra grain và row count của toàn bộ bảng Iceberg qua allow-listed gateway:
 
@@ -139,6 +152,8 @@ Kết quả phải có `return_code: 0`; `row_count` phải bằng
 | Consumer lag tăng | consumer group describe | tăng resource/partition hoặc giảm producer rate |
 | Debezium task `FAILED` | Connect status `tasks[].trace` | sửa privilege/config rồi chạy lại `cdc-bootstrap` |
 | CDC slot inactive/WAL tăng | `pg_replication_slots`, exporter metrics | khôi phục Connect trước safety cap; không drop slot để né alert |
+| Customer Silver lag/difference | materializer log, group lag, `cdc-reconcile` | giữ offset/Bronze, sửa consumer rồi replay; không bật lại dual writer tùy tiện |
+| Registry/Avro lỗi | Registry health/subjects, connector task trace | rollback schema/DDL hoặc version topic; không tắt compatibility để cho qua |
 | Candidate treo | Prometheus alert + Airflow run | xử lý downstream; không advance watermark bằng tay |
 | MinIO đầy | bucket usage, Iceberg snapshots | chạy maintenance; tăng disk trước khi ingest lại |
 | Grafana trống | Prometheus targets | sửa exporter/scrape trước, không sửa dashboard vội |
@@ -149,7 +164,7 @@ Lệnh log thường dùng:
 docker compose logs --tail=200 airflow-worker
 docker compose logs --tail=200 spark-gateway spark-master spark-worker
 docker compose logs --tail=200 order-stream kafka
-docker compose logs --tail=200 debezium-connect cdc-bootstrap
+docker compose logs --tail=200 schema-registry debezium-connect cdc-bootstrap customer-cdc-materializer
 docker compose logs --tail=200 platform-exporter prometheus
 ```
 

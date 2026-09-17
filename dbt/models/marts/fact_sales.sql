@@ -17,7 +17,7 @@
         materialized='incremental',
         incremental_strategy='merge',
         unique_key='order_item_id',
-        on_schema_change='sync_all_columns',
+        on_schema_change='fail',
         indexes=[
             {'columns': ['order_date']},
             {'columns': ['customer_sk']},
@@ -29,8 +29,9 @@
 
 {#
   A project upgrade can encounter a relation created before source_loaded_at
-  existed.  In that one migration run, read all rows and let dbt add the new
-  columns before MERGE.  Normal runs retain the high-water filter.
+  existed. In that one migration run, read all rows; the required DDL migration
+  must add contracted columns explicitly before MERGE. Normal runs retain the
+  high-water filter.
 #}
 {% set target_state = namespace(has_source_loaded_at=false) %}
 {% if is_incremental() %}

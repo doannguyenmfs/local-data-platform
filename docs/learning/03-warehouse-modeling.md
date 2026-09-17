@@ -60,10 +60,10 @@ tạo; nó không “tự biết” là SK.
 Model `dim_customer` chủ động alias nó thành `customer_sk`, từ đó project định
 nghĩa semantics và test unique/not-null.
 
-Snapshot hiện chưa thấy hard delete ở OLTP vì staging là current-state upsert
-nhưng chưa có bước xóa/tombstone key đã biến mất ở source. Việc thêm mapping
-delete source → staging đã được chủ động để lại cho bước nâng cấp sau; không nên
-ghi tài liệu rằng snapshot đã xử lý một tín hiệu mà upstream chưa cung cấp.
+Snapshot đọc CDC Silver current state và bật `hard_deletes: invalidate`. Khi
+consumer apply event `d`, key biến mất khỏi `customers_current`; dbt đóng
+`dbt_valid_to` của version mở nhưng giữ lịch sử. Tombstone Kafka chỉ phục vụ
+compaction; business delete được apply từ event `d`.
 
 ## Valid time và load time
 

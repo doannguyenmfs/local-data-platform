@@ -21,8 +21,8 @@ Ký hiệu trạng thái:
 
 | # | Platform có thể làm gì? | Trạng thái | Kết quả chính |
 | ---: | --- | --- | --- |
-| 1 | Dựng lại toàn bộ môi trường bằng code | Local-ready | 29 Compose services, healthcheck, volume và profile |
-| 2 | Nạp tăng dần 5 bảng OLTP vào staging | Hoàn thành | UPSERT theo primary key và cửa sổ `updated_at` |
+| 1 | Dựng lại toàn bộ môi trường bằng code | Local-ready | 35 Compose services, healthcheck, volume và profile |
+| 2 | Nạp tăng dần 4 bảng batch + customer CDC | Hoàn thành | watermark UPSERT và WAL/offset materialization |
 | 3 | Chạy lại an toàn khi task/DAG lỗi | Hoàn thành | idempotent staging/mart/Iceberg/Kafka sinks |
 | 4 | Backfill một khoảng thời gian tùy chọn | Hoàn thành | cửa sổ `[start, end)`, không đổi scheduled watermark |
 | 5 | Chặn batch sai trước khi publish | Hoàn thành | count, relationship, grain và business assertions |
@@ -30,7 +30,7 @@ Ký hiệu trạng thái:
 | 7 | Chỉ transform phần dữ liệu thay đổi | Hoàn thành | dbt incremental MERGE và affected-date recompute |
 | 8 | Ghi fact vào lakehouse ACID | Hoàn thành | Iceberg MERGE, snapshot, time travel, maintenance |
 | 9 | Publish và xử lý event gần realtime | Local-ready | Kafka history/current state/DLQ và checkpoint |
-| 10 | Capture thay đổi database, kể cả delete | Một phần | Debezium raw `r/c/u/d/tombstone`; chưa apply vào mart |
+| 10 | Capture và apply customer CDC kể cả delete | Hoàn thành | Avro `r/c/u/d/t`, Bronze, Silver, reconcile, SCD2 invalidate |
 | 11 | Điều phối nhiều sink với commit barrier | Hoàn thành | Airflow chỉ advance watermark sau mọi nhánh bắt buộc |
 | 12 | Theo dõi health, freshness và stuck state | Local-ready | exporter, Prometheus, 8 alerts, Grafana, Alertmanager |
 | 13 | Kiểm tra thay đổi trước khi merge Git | Hoàn thành | dbt CI, Python/Compose/config tests và image builds |
@@ -62,8 +62,9 @@ container bị thay, không bảo vệ khi host/disk hỏng hoặc `down -v`.
 
 ### Chức năng
 
-Daily DAG nạp `customers`, `products`, `orders`, `order_items` và `payments`
-song song. Mỗi bảng chỉ đọc phần có `updated_at` trong source window mới.
+Daily DAG nạp `products`, `orders`, `order_items` và `payments` song song. Mỗi
+bảng chỉ đọc phần có `updated_at` trong source window mới. Customer do consumer
+CDC liên tục sở hữu và không tham gia watermark commit barrier.
 
 ```text
 committed watermark < source.updated_at <= captured upper bound
@@ -232,15 +233,16 @@ materialize thành ba bảng Iceberg:
 
 ### Giới hạn
 
-JSON contract hiện được kiểm tra bằng code, chưa có Schema Registry hoặc
-compatibility gate tập trung.
+Order-event path vẫn dùng JSON code validation. Customer CDC path dùng Avro,
+Apicurio Registry và `BACKWARD_TRANSITIVE` compatibility; hai event domain có
+contract maturity khác nhau và được ghi rõ thay vì gọi chung “Kafka”.
 
 ## 11. Database Change Data Capture
 
 ### Chức năng đã có
 
-Debezium đọc PostgreSQL WAL và lưu thay đổi `public.customers` vào topic
-`ecommerce_cdc.public.customers`:
+Debezium đọc PostgreSQL WAL và lưu Avro change của `public.customers` vào topic
+`ecommerce_cdc_avro.public.customers`:
 
 - initial state: `op=r`;
 - insert: `op=c`;
@@ -250,10 +252,10 @@ Debezium đọc PostgreSQL WAL và lưu thay đổi `public.customers` vào topi
 Replication slot giữ WAL chưa xử lý; Kafka Connect offset giữ LSN đã đọc. Role
 CDC riêng không phải superuser, publication chỉ allow-list `customers`.
 
-### Ranh giới chức năng hiện tại
-
-CDC đã **capture và store**, chưa **apply**. Customer bị xóa ở OLTP đã có event
-Kafka nhưng vẫn có thể còn trong `staging.customers` và `dim_customer`.
+Consumer ghi immutable Bronze theo Kafka coordinate và fold Silver theo
+LSN/offset. `r/c/u` upsert, `d` đặt tombstone, Kafka tombstone `t` chỉ vào Bronze.
+dbt đọc Silver current; hard delete đóng version SCD2 hiện hành nhưng giữ lịch
+sử. Airflow customer poller đã retire, watermark cũ giữ `active=false` để audit.
 
 ## 12. Orchestration và commit barrier
 
@@ -263,7 +265,7 @@ Airflow điều phối:
 
 ```text
 validate config
-  → 5 extract task song song
+  → 4 extract task song song (customer đi CDC liên tục)
   → count/relationship validation
   → [dbt, Iceberg batch, Kafka publish] song song
   → advance all watermarks
@@ -303,7 +305,9 @@ distributed tracing hoặc SLO/error-budget automation.
 
 GitHub Actions kiểm tra:
 
-- dbt initial build, no-op replay và mutation behavior;
+- slim PR graph bằng state/defer;
+- full main initial build, no-op replay và mutation behavior;
+- enforced name/type contract cho public marts;
 - Python compile;
 - Docker Compose render;
 - Prometheus/Alertmanager syntax;
@@ -317,12 +321,11 @@ shutdown và backup tối thiểu. Đây là nền tảng operability, chưa ph�
 
 Để tránh đọc capability theo hướng quá lạc quan, project hiện chưa:
 
-- apply CDC delete vào staging/dimension;
 - bảo đảm HA khi một node/host mất;
 - mã hóa/authenticate traffic nội bộ;
 - gửi alert tới người trực;
 - backup off-host và tự động restore test;
-- enforce event schema compatibility bằng registry;
+- enforce schema registry cho order-event JSON domain (customer CDC đã có);
 - cung cấp semantic/API serving layer cho BI/application;
 - tự động scale hoặc chứng minh capacity bằng load/soak test;
 - triển khai environment thật bằng IaC/Kubernetes.
@@ -335,11 +338,11 @@ gần production; `P2` mở rộng scale/governance/product capability.
 
 | ID | Ưu tiên | Nâng cấp | Capability được mở khóa |
 | --- | --- | --- | --- |
-| A1 | P0 | Schema Registry/compatibility | event contract có thể enforce và evolve |
-| A2 | P0 | CDC Bronze | raw database change audit/replay bằng SQL |
-| A3 | P0 | CDC Silver | current state thực sự apply insert/update/delete |
-| A4 | P0 | CDC cutover | chuyển ownership an toàn, retire batch customer poller |
-| A5 | P0 | dbt contracts/slim CI | chặn breaking mart và rút ngắn PR feedback |
+| A1 | P0 ✅ | Schema Registry/compatibility | event contract có thể enforce và evolve |
+| A2 | P0 ✅ | CDC Bronze | raw database change audit/replay bằng SQL |
+| A3 | P0 ✅ | CDC Silver | current state thực sự apply insert/update/delete |
+| A4 | P0 ✅ | CDC cutover | chuyển ownership an toàn, retire batch customer poller |
+| A5 | P0 ✅ | dbt contracts/slim CI | chặn breaking mart và rút ngắn PR feedback |
 | A6 | P1 | External alerting/SLO | alert tới đúng owner và đo reliability |
 | A7 | P1 | Backup/PITR/DR | phục hồi có RPO/RTO được chứng minh |
 | A8 | P1 | Security hardening | encryption, authentication và least privilege |
@@ -353,58 +356,65 @@ gần production; `P2` mở rộng scale/governance/product capability.
 | A16 | P2 | Governance/privacy | PII, retention, deletion và access audit |
 | A17 | P2 | IaC/Kubernetes/cloud | promotion/deployment tái lập trên hạ tầng thật |
 
-### P0 — Hoàn thiện data contract và CDC end-to-end
+### P0 — Hoàn thành data contract và CDC end-to-end
 
-#### A1. Schema Registry và compatibility gate
+P0 đã hoàn thành ngày 2026-09-17. Các đoạn dưới giữ nguyên “vì sao/cơ chế/Done”
+như decision record để người học hiểu thiết kế, không còn là backlog mở.
+
+#### A1. Schema Registry và compatibility gate — Hoàn thành
 
 **Vì sao cần:** JSON schema đang lặp trong message và producer/consumer có thể
 thay đổi không tương thích mà broker không ngăn được.
 
-**Triển khai:** thêm registry, Avro/Protobuf/JSON Schema serializer, subject
-naming, backward compatibility và CI test cho schema evolution.
+**Đã triển khai:** Apicurio Registry KafkaSQL, Debezium Avro converter, versioned
+subject/topic, `BACKWARD_TRANSITIVE`, FULL validity và read-only breaking test.
 
 **Done khi:** incompatible schema bị CI/registry từ chối; consumer đọc được cả
 version cũ và mới; runbook có quy trình rollout/rollback.
 
-#### A2. CDC Bronze raw table
+#### A2. CDC Bronze raw table — Hoàn thành
 
 **Vì sao cần:** Kafka retention không nên là kho lưu audit duy nhất; cần replay
 theo LSN/topic coordinates và query/debug bằng SQL.
 
-**Triển khai:** Spark/Flink/Kafka Connect sink append nguyên Debezium envelope
-vào Iceberg Bronze, giữ key, `op`, LSN, transaction, Kafka coordinates và raw
-payload.
+**Đã triển khai:** Python consumer append Debezium envelope vào PostgreSQL
+Bronze, giữ key, `op`, LSN, transaction, Kafka coordinates và JSONB payload.
+PostgreSQL phù hợp volume lab/query học; production lớn có thể chuyển contract
+này sang Iceberg mà không đổi identity semantics.
 
 **Done khi:** replay cùng offset không nhân đôi Bronze identity và source event
-được trace từ PostgreSQL LSN tới Iceberg row.
+được trace từ PostgreSQL LSN tới PostgreSQL Bronze row. Iceberg chỉ là
+hướng scale-out sau này, không phải storage đang được P0 sử dụng.
 
-#### A3. CDC Silver current state và delete apply
+#### A3. CDC Silver current state và delete apply — Hoàn thành
 
 **Vì sao cần:** đây là phần còn thiếu để delete thực sự ảnh hưởng downstream.
 
-**Triển khai:** dedupe theo source coordinates; áp `r/c/u` thành upsert và `d`
+**Đã triển khai:** dedupe theo source coordinates; áp `r/c/u` thành upsert và `d`
 thành delete/closed-state; xử lý out-of-order/replay bằng LSN/version rule.
 
 **Done khi:** source insert/update/delete tạo đúng Silver state sau restart và
 replay; có reconciliation với source current keys.
 
-#### A4. Parallel run, reconcile và cutover customer ownership
+#### A4. Parallel run, reconcile và cutover customer ownership — Hoàn thành
 
 **Vì sao cần:** không thể để Airflow batch và CDC âm thầm cùng ghi staging.
 
-**Triển khai:** chạy song song raw/Silver, so count/hash/key/delete, chuyển dbt
+**Đã triển khai:** chạy song song raw/Silver, so count/key/attribute/delete, chuyển dbt
 source sang Silver, đóng băng batch customer writer rồi retire watermark riêng.
 
 **Done khi:** không có dual-writer, rollback path rõ và `dim_customer` đóng đúng
 current version sau source delete.
 
-#### A5. dbt model contracts và slim CI
+#### A5. dbt model contracts và slim CI — Hoàn thành
 
 **Vì sao cần:** tests kiểm tra data sau chạy nhưng chưa enforce đầy đủ column
 name/type contract trước consumer; CI hiện chưa chọn state-aware modified graph.
 
-**Triển khai:** contracts cho public marts, version/deprecation policy,
-`state:modified+`, defer tới manifest chuẩn và production artifact promotion.
+**Đã triển khai:** enforced name/type contracts cho public marts;
+`state:modified+` và defer tới base-SHA manifest/relation trong PR; full
+idempotency/mutation build trên main. Artifact promotion/version-deprecation ở
+quy mô nhiều team vẫn là bước tổ chức ngoài local lab.
 
 **Done khi:** breaking mart change fail trước deploy và PR chỉ build graph bị
 ảnh hưởng nhưng vẫn an toàn.
@@ -506,9 +516,9 @@ name/type contract trước consumer; CI hiện chưa chọn state-aware modifie
 ## 17. Thứ tự triển khai được khuyến nghị
 
 ```text
-Schema Registry/contracts
+Schema Registry/contracts ✅
     ↓
-CDC Bronze → Silver → reconciliation → cutover
+CDC Bronze → Silver → reconciliation → cutover ✅
     ↓
 External alerting/SLO + backup/restore + security
     ↓

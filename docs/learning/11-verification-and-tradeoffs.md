@@ -124,9 +124,9 @@ Spark Operator, Livy hoặc managed job API.
 
 | Năng lực | Project hiện có | Phần còn thiếu để production |
 | --- | --- | --- |
-| Data correctness | grain, relationship, accepted-value, reconciliation, SCD2 invariant, replay test | contract enforcement ở mọi boundary, anomaly/control total theo dataset critical |
+| Data correctness | grain, relationship, accepted-value, reconciliation, SCD2 invariant, replay test, mart contracts | contracts cho order-event/remaining external boundaries, anomaly/control totals |
 | Incremental/retry | candidate watermark, MERGE, deterministic event ID, checkpoint, no-op replay | concurrency fencing cho nhiều DAG run/writer và recovery drill định kỳ |
-| CDC | WAL, least-privilege role, publication allow-list, durable slot/offset, delete capture | Bronze/Silver consumer, dedupe/apply delete, reconciliation và ownership cutover |
+| CDC | WAL, Avro Registry, least-privilege role, durable slot/offset, Bronze/Silver, delete apply, reconciliation/cutover | mở rộng table scope có capacity review, retention/archive và DR drill |
 | Availability | restart policy, healthcheck, durable local volume | PostgreSQL/Kafka/MinIO/Airflow/Connect HA trên failure domain khác nhau |
 | Security | non-root image khi phù hợp, separate replication role, env-based config | TLS, Kafka SASL/ACL, database RBAC chi tiết, network policy, secret manager/rotation |
 | Observability | exporter, Prometheus, 8 alert rules, Grafana, Alertmanager local, runbook | external receiver, on-call/escalation, centralized logs/traces, SLO/error budget |
@@ -142,12 +142,11 @@ như on-call, DR, security governance và deployment promotion.
 
 ### Ưu tiên nâng cấp, không phải danh sách mua thêm công nghệ
 
-1. Hoàn thiện data contract: Schema Registry và compatibility gate.
-2. Materialize CDC vào Bronze/Silver, đối soát rồi cut over customer ownership.
-3. Thêm external alert receiver, owner/runbook URL và SLO cho pipeline critical.
-4. Backup off-host + restore drill; định nghĩa RPO/RTO trước khi nói HA.
-5. TLS/SASL/RBAC, secret manager và network segmentation.
-6. Load/soak/failure test rồi mới quyết định scale node/partition/resource.
+1. Thêm external alert receiver, owner/runbook URL và SLO cho pipeline critical.
+2. Backup off-host + restore drill; định nghĩa RPO/RTO trước khi nói HA.
+3. TLS/SASL/RBAC, secret manager và network segmentation.
+4. Thêm lineage/catalog và centralized logs cho điều tra xuyên component.
+5. Load/soak/failure test rồi mới quyết định scale node/partition/resource.
 
 Thứ tự này ưu tiên tính đúng và khả năng phục hồi trước việc làm topology trông
 “to” hơn.

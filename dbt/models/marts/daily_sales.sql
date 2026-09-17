@@ -16,7 +16,7 @@
         materialized='incremental',
         incremental_strategy='merge',
         unique_key='sales_date',
-        on_schema_change='sync_all_columns',
+        on_schema_change='fail',
         post_hook=[
             "delete from {{ this }} as daily where not exists (select 1 from {{ ref('fact_sales') }} as fact where fact.order_date::date = daily.sales_date)"
         ]
@@ -25,8 +25,9 @@
 
 {#
   Upgrade guard: a target created before max_source_loaded_at existed cannot be
-  used for incremental filtering. Let dbt sync the column during one full-path
-  run, then enable the normal high-water branch on later runs.
+  used for incremental filtering. A reviewed DDL migration must add the
+  contracted column; this guard then chooses the full-path rebuild once before
+  enabling normal high-water filtering on later runs.
 #}
 {% set target_state = namespace(has_max_source_loaded_at=false) %}
 {% if is_incremental() %}

@@ -3,7 +3,7 @@ version: 2
 models:
   - name: stg_customers
     description: >
-      Stable dbt interface over customer data loaded by Airflow.
+      Stable dbt interface over customer current state applied from CDC Silver.
       Grain: one row per customer.
 
     columns:
@@ -29,7 +29,7 @@ models:
         description: Timestamp of the latest source-side customer change.
 
       - name: loaded_at
-        description: Timestamp when Airflow last loaded the record into staging.
+        description: Timestamp when the CDC consumer last applied this state.
 
   - name: stg_products
     description: >

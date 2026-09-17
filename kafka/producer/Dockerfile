@@ -12,6 +12,9 @@ COPY kafka/producer/publish_orders.py /app/publish_orders.py
 # jobs. They need the same PostgreSQL and Kafka clients as the batch producer,
 # while the long-running Debezium connector remains a separate Java process.
 COPY cdc /app/cdc
+COPY schema_registry /app/schema_registry
+# The consumer applies this idempotent online migration before reading Kafka.
+COPY postgres/sql /app/postgres/sql
 
 # The producer only needs network access; UID nobody prevents accidental writes
 # to image-owned paths and avoids running application code as root.

@@ -9,6 +9,8 @@ DECLARE
     jan_2_paid_sales NUMERIC(16, 2);
     stale_jan_3_count BIGINT;
     jan_4_count BIGINT;
+    customer_1_versions BIGINT;
+    customer_3_current BIGINT;
 BEGIN
     -- These are control totals for the intentionally tiny fixture, not
     -- production thresholds.
@@ -30,6 +32,15 @@ BEGIN
     FROM daily_sales
     WHERE sales_date = DATE '2026-01-04';
 
+    SELECT COUNT(*) INTO customer_1_versions
+    FROM dim_customer
+    WHERE customer_id = '00000000-0000-0000-0000-000000000001';
+
+    SELECT COUNT(*) INTO customer_3_current
+    FROM dim_customer
+    WHERE customer_id = '00000000-0000-0000-0000-000000000003'
+      AND is_current;
+
     IF fact_count <> 3 THEN
         RAISE EXCEPTION 'Expected 3 fact rows, got %', fact_count;
     END IF;
@@ -48,5 +59,13 @@ BEGIN
 
     IF jan_4_count <> 1 THEN
         RAISE EXCEPTION 'Expected Jan 4 aggregate to be created';
+    END IF;
+
+    IF customer_1_versions <> 2 THEN
+        RAISE EXCEPTION 'Expected 2 SCD2 versions for customer 1, got %', customer_1_versions;
+    END IF;
+
+    IF customer_3_current <> 0 THEN
+        RAISE EXCEPTION 'Deleted customer 3 still has a current dimension version';
     END IF;
 END $$;

@@ -475,9 +475,54 @@ services:
           --partitions 3 \
           --replication-factor 1 \
           --config retention.ms=604800000
+        # Apicurio KafkaSQL rebuilds registry state from this journal. Unlike a
+        # business event topic, it must never expire records by time or size.
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:19092 \
+          --create \
+          --if-not-exists \
+          --topic ecommerce.registry.journal.v3 \
+          --partitions 1 \
+          --replication-factor 1 \
+          --config cleanup.policy=delete \
+          --config retention.ms=-1 \
+          --config retention.bytes=-1
     depends_on:
       kafka:
         condition: service_healthy
+
+  # Registry stores versioned event contracts and rejects incompatible schema
+  # evolution. KafkaSQL makes the Kafka journal the durable source of truth;
+  # the embedded SQL state is only a cache rebuilt after restart.
+  schema-registry:
+    image: apicurio/apicurio-registry:3.2.5
+    container_name: local-data-platform-schema-registry
+    profiles: ["streaming"]
+    restart: unless-stopped
+    environment:
+      APICURIO_STORAGE_KIND: kafkasql
+      APICURIO_KAFKASQL_BOOTSTRAP_SERVERS: kafka:19092
+      APICURIO_KAFKASQL_TOPIC: ecommerce.registry.journal.v3
+      # Enforce valid Avro and compatibility against every prior version. A
+      # lagging consumer can therefore still read data from older schemas.
+      APICURIO_RULES_GLOBAL_VALIDITY: FULL
+      APICURIO_RULES_GLOBAL_COMPATIBILITY: BACKWARD_TRANSITIVE
+    ports:
+      - "${SCHEMA_REGISTRY_HOST_PORT:-8084}:8080"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        # Apicurio exposes application APIs on 8080 and Quarkus management
+        # health on its internal port 9000.
+        - curl --fail --silent http://localhost:9000/health/ready >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    mem_limit: 1g
 
   # Kafka Connect hosts the Debezium PostgreSQL source connector. Connector
   # offsets/config/status live in compacted Kafka internal topics, while the
@@ -498,9 +543,10 @@ services:
       STATUS_STORAGE_REPLICATION_FACTOR: 1
       KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      # CONNECT_* properties are written verbatim into the worker config. Keep
-      # JSON schema envelopes for explicit type/optionality metadata; the next
-      # roadmap step can replace this verbose format with Schema Registry.
+      # Install Apicurio's converter plug-ins. The Debezium connector overrides
+      # the worker JSON defaults with registry-backed Avro; keeping defaults
+      # avoids silently changing unrelated future connectors.
+      ENABLE_APICURIO_CONVERTERS: "true"
       CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "true"
       CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "true"
       CONNECT_TOPIC_CREATION_ENABLE: "true"
@@ -518,8 +564,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      kafka-init:
-        condition: service_completed_successfully
+      schema-registry:
+        condition: service_healthy
     mem_limit: 1g
 
   # This finite deployment step creates the least-privilege PostgreSQL role and
@@ -544,11 +590,12 @@ services:
       ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
       CDC_POSTGRES_USER: ${CDC_POSTGRES_USER:-cdc_reader}
       CDC_POSTGRES_PASSWORD: ${CDC_POSTGRES_PASSWORD:-cdc_local_password}
-      CDC_CONNECTOR_NAME: ${CDC_CONNECTOR_NAME:-ecommerce-postgres-cdc}
-      CDC_TOPIC_PREFIX: ${CDC_TOPIC_PREFIX:-ecommerce_cdc}
-      CDC_SLOT_NAME: ${CDC_SLOT_NAME:-ecommerce_cdc_slot}
+      CDC_CONNECTOR_NAME: ${CDC_CONNECTOR_NAME:-ecommerce-postgres-cdc-avro}
+      CDC_TOPIC_PREFIX: ${CDC_TOPIC_PREFIX:-ecommerce_cdc_avro}
+      CDC_SLOT_NAME: ${CDC_SLOT_NAME:-ecommerce_cdc_avro_slot}
       CDC_PUBLICATION_NAME: ${CDC_PUBLICATION_NAME:-ecommerce_cdc_publication}
       DEBEZIUM_CONNECT_URL: http://debezium-connect:8083
+      SCHEMA_REGISTRY_NATIVE_URL: http://schema-registry:8080/apis/registry/v2
     depends_on:
       debezium-connect:
         condition: service_healthy
@@ -571,10 +618,128 @@ services:
       ECOMMERCE_POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
       ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
-      CDC_TOPIC_PREFIX: ${CDC_TOPIC_PREFIX:-ecommerce_cdc}
+      CDC_TOPIC_PREFIX: ${CDC_TOPIC_PREFIX:-ecommerce_cdc_avro}
+      SCHEMA_REGISTRY_CCOMPAT_URL: http://schema-registry:8080/apis/ccompat/v7
     depends_on:
       cdc-bootstrap:
         condition: service_completed_successfully
+
+  # Read-only compatibility proof: the real Debezium key/value subjects must
+  # exist, current schemas must pass, and an intentionally breaking type change
+  # must be rejected without registering a synthetic version.
+  schema-contract-test:
+    build:
+      context: .
+      dockerfile: kafka/producer/Dockerfile
+    image: local-data-platform-order-producer:1.0.0
+    profiles: ["tools"]
+    entrypoint: ["python", "/app/schema_registry/verify_contract.py"]
+    volumes:
+      - ./schema_registry:/app/schema_registry:ro
+    environment:
+      CDC_TOPIC_PREFIX: ${CDC_TOPIC_PREFIX:-ecommerce_cdc_avro}
+      SCHEMA_REGISTRY_CCOMPAT_URL: http://schema-registry:8080/apis/ccompat/v7
+    depends_on:
+      cdc-bootstrap:
+        condition: service_completed_successfully
+
+  # Long-running data-plane consumer. It drains the initial Debezium snapshot,
+  # follows live WAL changes, writes immutable Bronze evidence and applies
+  # current customer state (including deletes) to Silver.
+  customer-cdc-materializer:
+    build:
+      context: .
+      dockerfile: kafka/producer/Dockerfile
+    image: local-data-platform-order-producer:1.0.0
+    container_name: local-data-platform-customer-cdc-materializer
+    profiles: ["streaming"]
+    restart: unless-stopped
+    entrypoint: ["python", "/app/cdc/materialize_customers.py"]
+    volumes:
+      - ./cdc:/app/cdc:ro
+      - ./postgres/sql:/app/postgres/sql:ro
+    environment:
+      ECOMMERCE_POSTGRES_HOST: postgres
+      ECOMMERCE_POSTGRES_PORT: ${ECOMMERCE_POSTGRES_PORT}
+      ECOMMERCE_POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
+      ECOMMERCE_POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
+      ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      CDC_TOPIC_PREFIX: ${CDC_TOPIC_PREFIX:-ecommerce_cdc_avro}
+      CDC_CUSTOMER_CONSUMER_GROUP: ${CDC_CUSTOMER_CONSUMER_GROUP:-customer-cdc-silver-v1}
+      SCHEMA_REGISTRY_CCOMPAT_URL: http://schema-registry:8080/apis/ccompat/v7
+    depends_on:
+      cdc-bootstrap:
+        condition: service_completed_successfully
+
+  # Finite drain mode is useful for maintenance and deterministic tests. It
+  # uses the same consumer group/state as the daemon and exits after backlog is
+  # empty rather than creating a second writer contract.
+  customer-cdc-once:
+    build:
+      context: .
+      dockerfile: kafka/producer/Dockerfile
+    image: local-data-platform-order-producer:1.0.0
+    profiles: ["tools"]
+    entrypoint:
+      - python
+      - /app/cdc/materialize_customers.py
+      - --idle-exit-seconds
+      - "5"
+    volumes:
+      - ./cdc:/app/cdc:ro
+      - ./postgres/sql:/app/postgres/sql:ro
+    environment:
+      ECOMMERCE_POSTGRES_HOST: postgres
+      ECOMMERCE_POSTGRES_PORT: ${ECOMMERCE_POSTGRES_PORT}
+      ECOMMERCE_POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
+      ECOMMERCE_POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
+      ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      CDC_TOPIC_PREFIX: ${CDC_TOPIC_PREFIX:-ecommerce_cdc_avro}
+      CDC_CUSTOMER_CONSUMER_GROUP: ${CDC_CUSTOMER_CONSUMER_GROUP:-customer-cdc-silver-v1}
+      SCHEMA_REGISTRY_CCOMPAT_URL: http://schema-registry:8080/apis/ccompat/v7
+    depends_on:
+      cdc-bootstrap:
+        condition: service_completed_successfully
+
+  cdc-materialization-test:
+    build:
+      context: .
+      dockerfile: kafka/producer/Dockerfile
+    image: local-data-platform-order-producer:1.0.0
+    profiles: ["tools"]
+    entrypoint: ["python", "/app/cdc/verify_materialization.py"]
+    volumes:
+      - ./cdc:/app/cdc:ro
+    environment:
+      ECOMMERCE_POSTGRES_HOST: postgres
+      ECOMMERCE_POSTGRES_PORT: ${ECOMMERCE_POSTGRES_PORT}
+      ECOMMERCE_POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
+      ECOMMERCE_POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
+      ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
+    depends_on:
+      customer-cdc-materializer:
+        condition: service_started
+
+  cdc-reconcile:
+    build:
+      context: .
+      dockerfile: kafka/producer/Dockerfile
+    image: local-data-platform-order-producer:1.0.0
+    profiles: ["tools"]
+    entrypoint: ["python", "/app/cdc/reconcile_customers.py"]
+    volumes:
+      - ./cdc:/app/cdc:ro
+    environment:
+      ECOMMERCE_POSTGRES_HOST: postgres
+      ECOMMERCE_POSTGRES_PORT: ${ECOMMERCE_POSTGRES_PORT}
+      ECOMMERCE_POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
+      ECOMMERCE_POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
+      ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
+    depends_on:
+      customer-cdc-materializer:
+        condition: service_started
 
   order-producer:
     build:
@@ -667,9 +832,10 @@ services:
       ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
       KAFKA_ORDER_TOPIC: ecommerce.order-events.v1
-      CDC_CONNECTOR_NAME: ${CDC_CONNECTOR_NAME:-ecommerce-postgres-cdc}
-      CDC_SLOT_NAME: ${CDC_SLOT_NAME:-ecommerce_cdc_slot}
+      CDC_CONNECTOR_NAME: ${CDC_CONNECTOR_NAME:-ecommerce-postgres-cdc-avro}
+      CDC_SLOT_NAME: ${CDC_SLOT_NAME:-ecommerce_cdc_avro_slot}
       DEBEZIUM_CONNECT_URL: http://debezium-connect:8083
+      SCHEMA_REGISTRY_HEALTH_URL: http://schema-registry:9000/health/ready
       SPARK_GATEWAY_HEALTH_URL: http://spark-gateway:8090/health
       MINIO_HEALTH_URL: http://minio:9000/minio/health/live
       AIRFLOW_HEALTH_URL: http://airflow-api-server:8080/api/v2/monitor/health

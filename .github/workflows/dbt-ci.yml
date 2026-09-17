@@ -1,5 +1,6 @@
-# Validate both creation and the stateful incremental path. The mutation phase
-# catches stale aggregates that a one-shot `dbt build` would never exercise.
+# Pull requests use state-aware slim CI: build changed nodes plus downstream and
+# defer unchanged parents to a baseline manifest/relation set. Main still runs
+# the full stateful build; speed at review time does not replace release proof.
 name: dbt CI
 
 on:
@@ -15,6 +16,7 @@ on:
     paths:
       - "dbt/**"
       - "postgres/init/**"
+      - "postgres/sql/**"
       - "postgres/ci/**"
       - ".github/workflows/dbt-ci.yml"
 
@@ -59,6 +61,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          # Slim CI needs the base commit, not only the PR merge checkout.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -98,6 +103,22 @@ jobs:
             --username "$ECOMMERCE_POSTGRES_USER" \
             --dbname "$ECOMMERCE_POSTGRES_DB" \
             --set ON_ERROR_STOP=1 \
+            --file postgres/init/003_create_etl_metadata.sql
+
+          psql \
+            --host "$ECOMMERCE_POSTGRES_HOST" \
+            --port "$ECOMMERCE_POSTGRES_HOST_PORT" \
+            --username "$ECOMMERCE_POSTGRES_USER" \
+            --dbname "$ECOMMERCE_POSTGRES_DB" \
+            --set ON_ERROR_STOP=1 \
+            --file postgres/sql/003_cdc_customer_layers.sql
+
+          psql \
+            --host "$ECOMMERCE_POSTGRES_HOST" \
+            --port "$ECOMMERCE_POSTGRES_HOST_PORT" \
+            --username "$ECOMMERCE_POSTGRES_USER" \
+            --dbname "$ECOMMERCE_POSTGRES_DB" \
+            --set ON_ERROR_STOP=1 \
             --file postgres/ci/001_seed_staging.sql
 
       - name: Show dbt version
@@ -118,7 +139,35 @@ jobs:
             --target ci \
             --no-partial-parse
 
-      - name: Build and test dbt project
+      - name: Build base-branch state for deferred relations
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DBT_CI_SCHEMA: dbt_ci_base_${{ github.run_id }}_${{ github.run_attempt }}
+        run: |
+          git worktree add --detach /tmp/dbt-base "$BASE_SHA"
+          dbt build \
+            --project-dir /tmp/dbt-base/dbt \
+            --profiles-dir /tmp/dbt-base/dbt \
+            --target ci \
+            --target-path /tmp/dbt-base-target \
+            --no-partial-parse
+
+      - name: Build changed dbt graph with baseline deferral
+        if: github.event_name == 'pull_request'
+        run: |
+          dbt build \
+            --project-dir dbt \
+            --profiles-dir dbt \
+            --target ci \
+            --select 'state:modified+' \
+            --state /tmp/dbt-base-target \
+            --defer \
+            --favor-state \
+            --no-partial-parse
+
+      - name: Build and test full dbt project after merge
+        if: github.event_name != 'pull_request'
         run: |
           dbt build \
             --project-dir dbt \
@@ -127,6 +176,7 @@ jobs:
             --no-partial-parse
 
       - name: Rebuild to verify incremental idempotency
+        if: github.event_name != 'pull_request'
         run: |
           dbt build \
             --project-dir dbt \
@@ -135,6 +185,7 @@ jobs:
             --no-partial-parse
 
       - name: Mutate staging data
+        if: github.event_name != 'pull_request'
         env:
           PGPASSWORD: ${{ env.ECOMMERCE_POSTGRES_PASSWORD }}
         run: |
@@ -147,6 +198,7 @@ jobs:
             --file postgres/ci/002_mutate_staging.sql
 
       - name: Build changed records incrementally
+        if: github.event_name != 'pull_request'
         run: |
           dbt build \
             --project-dir dbt \
@@ -155,6 +207,7 @@ jobs:
             --no-partial-parse
 
       - name: Assert incremental results
+        if: github.event_name != 'pull_request'
         env:
           PGPASSWORD: ${{ env.ECOMMERCE_POSTGRES_PASSWORD }}
         run: |
