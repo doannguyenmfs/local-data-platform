@@ -39,6 +39,34 @@ groups:
         annotations:
           summary: "Required Kafka topic has no available partitions"
 
+      - alert: DebeziumConnectorNotRunning
+        expr: cdc_connector_up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Debezium connector {{ $labels.connector }} is not running"
+          description: "Connector or its PostgreSQL source task has left RUNNING state."
+
+      - alert: CdcReplicationSlotInactive
+        expr: cdc_replication_slot_active == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CDC replication slot {{ $labels.slot }} is inactive"
+          description: "An inactive slot retains WAL but is not delivering changes."
+
+      - alert: CdcReplicationSlotWalRetentionHigh
+        # The local PostgreSQL safety cap is 1 GiB; warn at half that amount so
+        # an operator can restore the connector before slot invalidation.
+        expr: cdc_replication_slot_retained_bytes > 536870912
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CDC slot {{ $labels.slot }} retains more than 512 MiB WAL"
+
       - alert: StagingTableEmpty
         expr: staging_table_rows == 0
         for: 10m

@@ -25,6 +25,7 @@ thoại. Mỗi bài đi theo cùng một trình tự:
 | 9 | [Integration](09-production-integration.md) | nhiều sink commit/retry mà không có distributed transaction thế nào? |
 | 10 | [Observability](10-observability.md) | health, freshness, metric, alert và data test khác nhau thế nào? |
 | 11 | [Verification](11-verification-and-tradeoffs.md) | bằng chứng nào đủ để tin một platform end-to-end? |
+| 12 | [CDC/Debezium](12-cdc-debezium.md) | WAL, LSN, publication, slot, snapshot và delete event phối hợp thế nào? |
 
 Đọc [Kiến trúc hệ thống](../architecture.md) sau Level 4 để gắn khái niệm vào
 container/node/network/volume. Giữ [Bản đồ code](../code-map.md) mở bên cạnh IDE
@@ -44,8 +45,8 @@ Spark execution, Iceberg metadata/transaction và failure recovery.
 
 ### Chuẩn bị phỏng vấn Streaming
 
-Đọc Level 4 → 7 → 8 → 9 → 10. Tập trung stable event identity, Kafka ordering,
-checkpoint crash window, MERGE sink, DLQ, lag/freshness.
+Đọc Level 4 → 7 → 8 → 9 → 10 → 12. Tập trung stable event identity, Kafka
+ordering, checkpoint crash window, MERGE sink, DLQ, WAL/LSN và slot retention.
 
 ### Muốn vận hành project ngay
 
@@ -76,6 +77,8 @@ Cho mỗi level:
 - Level 9: làm một downstream branch fail, chứng minh watermark chưa advance.
 - Level 10: dừng Kafka, quan sát pending → firing → resolved alert.
 - Level 11: chạy release checklist mà không xóa volume/checkpoint.
+- Level 12: chạy CDC smoke test, đọc đủ `c/u/d/tombstone`, rồi restart Connect
+  và chứng minh slot/offset tiếp tục thay vì snapshot lại.
 
 Không thực hiện destructive exercise trên dữ liệu cần giữ. `down -v`, schema
 reset và xóa checkpoint chỉ dùng sau khi đã hiểu state nào sẽ mất.

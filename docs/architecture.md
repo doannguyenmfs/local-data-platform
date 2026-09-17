@@ -29,7 +29,8 @@ cùng laptop. Vì vậy mỗi distributed system chỉ có số node tối thi�
 │ public source -> staging -> dbt dev/ci/prod schemas                 │
 │      │ JDBC                 │                                       │
 │      ├──────────────► Spark batch ──► Iceberg catalog + MinIO       │
-│      └──────────────► Kafka ──► Spark stream ──► Iceberg            │
+│      ├──────────────► Kafka ──► Spark stream ──► Iceberg            │
+│      └─ WAL ─► Debezium Connect ─► Kafka CDC topics                 │
 └──────────────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
@@ -46,10 +47,10 @@ compute engine hoặc dùng monitoring database làm source of truth.
 
 ## 3. Physical topology: container và node
 
-Compose định nghĩa 26 services: 18 process chạy dài hạn, 3 init job chạy rồi
-thoát và 5 one-shot tool chỉ được tạo khi gọi `docker compose run`.
+Compose định nghĩa 29 services: 19 process chạy dài hạn, 4 init job chạy rồi
+thoát và 6 one-shot tool chỉ được tạo khi gọi `docker compose run`.
 
-### 3.1 Long-running containers: 18
+### 3.1 Long-running containers: 19
 
 | Nhóm | Container/service | Node count | Trách nhiệm |
 | --- | --- | ---: | --- |
@@ -65,6 +66,7 @@ thoát và 5 one-shot tool chỉ được tạo khi gọi `docker compose run`.
 | Spark | `spark-worker` | 1 worker, 2 cores/3 GiB | chạy executor |
 | Spark | `spark-gateway` | 1 driver gateway | allow-list và submit finite Spark jobs |
 | Streaming | `kafka` | 1 combined broker/controller | KRaft event log |
+| CDC | `debezium-connect` | 1 Connect worker, 1 PostgreSQL source task | WAL -> table topics |
 | Streaming | `order-stream` | 1 long-running Spark driver | đọc Kafka micro-batch và ghi Iceberg |
 | Lake storage | `minio` | 1 object-storage node | bucket `warehouse` chứa Iceberg files |
 | Monitoring | `platform-exporter` | 1 | chuyển health/data state thành Prometheus metrics |
@@ -76,19 +78,20 @@ Một Spark application còn tạo executor process bên trong `spark-worker`; n
 không phải container service riêng trong file Compose. `order-stream` là driver
 liên tục, còn executor được master cấp trên worker.
 
-### 3.2 Init jobs: 3
+### 3.2 Init jobs: 4
 
 | Service | Chạy khi nào | Vì sao phải kết thúc? |
 | --- | --- | --- |
 | `airflow-init` | trước Airflow daemons | migrate metadata schema một lần |
 | `minio-init` | sau MinIO healthy | tạo bucket idempotently |
 | `kafka-init` | sau Kafka healthy | tạo topic/partition/config idempotently |
+| `cdc-bootstrap` | sau Connect healthy | tạo role/publication và upsert connector config |
 
 Trạng thái `Exited (0)` của init container là thành công, không phải component
 down. Giữ init logic riêng giúp startup repeatable và không nhét migration vào
 mọi daemon.
 
-### 3.3 One-shot tools: 5
+### 3.3 One-shot tools: 6
 
 | Service | Công việc |
 | --- | --- |
@@ -97,6 +100,7 @@ mọi daemon.
 | `iceberg-maintenance` | compact files và expire snapshots |
 | `order-producer` | publish deterministic order events |
 | `order-stream-once` | xử lý Kafka backlog rồi dừng |
+| `cdc-smoke-test` | chứng minh customer `c/u/d` và delete tombstone |
 
 Các service này thuộc profile `tools` và không chạy khi `up`. Chúng dùng cùng
 image/config với runtime thật để tránh “test trên môi trường khác production”.
@@ -107,6 +111,7 @@ image/config với runtime thật để tránh “test trên môi trường khá
 | --- | ---: | ---: | --- |
 | PostgreSQL | 1 node/database role | primary + replica/PITR | không HA, mất node là downtime |
 | Kafka | 1 broker/controller, RF=1 | >=3 broker/controller, RF=3 | không chịu được broker loss |
+| Kafka Connect | 1 worker/1 source task | >=2 workers; connector-specific HA | restart ngắn gây lag, slot giữ WAL |
 | Spark | 1 master + 1 worker | HA master + nhiều worker/autoscale | không parallel theo nhiều máy |
 | MinIO | 1 node | distributed/managed object store | không erasure coding/HA |
 | Airflow scheduler | 1 | >=2 scheduler, nhiều worker | control plane single point |
@@ -129,6 +134,7 @@ hoặc API cần người dùng truy cập.
 | 7077 | `spark-master:7077` | Spark master endpoint |
 | 8081 | `spark-master:8080` | Spark master UI |
 | 8082 | `spark-worker:8080` | Spark worker UI |
+| 8083 | `debezium-connect:8083` | Kafka Connect REST quản trị connector |
 | 8090 | `spark-gateway:8090` | local job API/health |
 | 9000 | `minio:9000` | S3-compatible API |
 | 9001 | `minio:9001` | MinIO console |
@@ -167,6 +173,10 @@ PostgreSQL và immutable object tree trong MinIO. Backup chỉ một phía khôn
 
 `lakehouse-data` không phải Iceberg warehouse; nó giữ Parquet demo và Spark
 checkpoint. Iceberg warehouse thật nằm trong MinIO `s3://warehouse/`.
+
+CDC state không có volume Connect riêng. Connector config/status/offset nằm
+trong các Kafka internal topic trên `kafka-data`; replication slot/LSN nằm trong
+PostgreSQL trên `ecommerce-postgres-data`. Hai phía phải được phục hồi nhất quán.
 
 ### 6.2 Bind mounts
 
@@ -207,12 +217,28 @@ Kafka topic (3 partitions)
 Nếu driver chết sau Iceberg commit nhưng trước checkpoint, batch được replay.
 Stable keys làm final state idempotent.
 
-### 7.3 Observability path
+### 7.3 CDC path
+
+```text
+public.customers transaction commit
+  -> PostgreSQL WAL / pgoutput
+  -> ecommerce_cdc_slot retains unread WAL
+  -> Debezium source task
+  -> ecommerce_cdc.public.customers (r/c/u/d + tombstone)
+```
+
+Initial snapshot bootstrap current rows; sau đó connector tiếp tục từ LSN đã
+ghi. CDC topic hiện là raw durable log và chưa ghi ngược vào `staging.customers`
+để tránh hai writer cạnh tranh với Airflow batch extractor.
+
+### 7.4 Observability path
 
 Exporter chủ động query PostgreSQL/Kafka/HTTP endpoint mỗi 15 giây. Prometheus
 scrape exporter và evaluate rules. Grafana chỉ đọc Prometheus; Alertmanager nhận
 firing alert. Exporter không crash khi dependency lỗi để vẫn xuất metric
 `platform_component_up=0`.
+Với CDC, exporter còn kiểm tra connector/task state, slot active và WAL bytes
+đang bị slot giữ lại; ping port Connect không đủ chứng minh capture đang chạy.
 
 ## 8. Compute và resource allocation
 
@@ -223,6 +249,7 @@ firing alert. Exporter không crash khi dependency lỗi để vẫn xuất metr
 - Gateway finite job dùng tối đa 1 core/2 GiB executor; lock serializes local
   submissions để tránh hai driver tranh worker nhỏ.
 - PostgreSQL ecommerce giới hạn 2 GiB trong lab.
+- Kafka Connect giới hạn 1 GiB container, Java heap tối đa 768 MiB.
 
 Đây là capacity guardrail, không phải sizing formula. Production phải benchmark
 dựa trên input volume, shuffle, state size, file size và SLA.
@@ -232,6 +259,7 @@ dựa trên input volume, shuffle, state size, file size và SLA.
 Hiện tại:
 
 - credential lấy từ `.env`;
+- Debezium dùng replication role riêng thay vì PostgreSQL superuser;
 - Kafka/internal HTTP dùng plaintext;
 - UI publish trên localhost;
 - Spark gateway chỉ cho phép job name định trước, không nhận arbitrary command;
@@ -249,6 +277,8 @@ manager và audit log.
 | Spark stream restart | Kafka log + checkpoint + Iceberg | service restart + replay |
 | Spark batch failure | committed Iceberg snapshot cũ | Airflow retry |
 | Kafka broker restart | `kafka-data` volume | broker restart |
+| Debezium restart | Connect offset topic + PostgreSQL slot | Connect restart/catch-up |
+| Debezium dừng quá lâu | slot giữ WAL tới safety cap | khôi phục connector hoặc controlled resnapshot |
 | MinIO restart | `minio-data` volume | service restart |
 | Candidate watermark treo | PostgreSQL metadata | operator theo runbook |
 
@@ -262,6 +292,7 @@ Off-host backup và restore drill vẫn là khoảng trống production.
 - Analytics engineering: `dbt/`
 - Spark batch/lakehouse/stream: `spark/jobs/`
 - Event producer: `kafka/producer/`
+- CDC bootstrap/verification: `cdc/`
 - Monitoring: `monitoring/`
 - CI: `.github/workflows/`
 - Operations: `docs/runbook.md`

@@ -21,12 +21,14 @@ Airflow incremental extract ──► staging PostgreSQL
        │                                             │
        └──── commit watermark ◄──────────────────────┘
 
+PostgreSQL WAL ──► Debezium Connect ──► raw CDC Kafka topics
+
 Exporter ──► Prometheus ──► Grafana
                     └─────► Alertmanager
 ```
 
-Topology chi tiết gồm 26 service definitions, 18 container chạy dài hạn, 3 init
-job, 5 one-shot tools, network/port/volume và lý do chọn số node được mô tả tại
+Topology chi tiết gồm 29 service definitions, 19 container chạy dài hạn, 4 init
+job, 6 one-shot tools, network/port/volume và lý do chọn số node được mô tả tại
 [Kiến trúc hệ thống](docs/architecture.md). Tra cứu trách nhiệm từng file tại
 [Bản đồ code](docs/code-map.md).
 
@@ -44,6 +46,7 @@ không nhân đôi dữ liệu.
 | Spark 3.5 | batch, Iceberg, streaming | <http://localhost:8081> |
 | Spark job gateway | API allow-list cho Airflow | <http://localhost:8090/health> |
 | Kafka 4 | durable event log | `localhost:9092` |
+| Debezium Connect | PostgreSQL WAL CDC | <http://localhost:8083> |
 | MinIO | S3-compatible Iceberg warehouse | <http://localhost:9001> |
 | Prometheus | metric và alert rules | <http://localhost:9090> |
 | Alertmanager | nhóm/trạng thái alert | <http://localhost:9093> |
@@ -84,6 +87,9 @@ docker compose --profile '*' run --rm --no-deps order-stream-once
 # Bảo trì Iceberg
 docker compose --profile '*' run --rm --no-deps iceberg-maintenance
 
+# Chứng minh CDC capture đủ create/update/delete/tombstone
+docker compose --profile '*' run --rm --no-deps cdc-smoke-test
+
 # Kiểm tra row count và business grain của các bảng Iceberg
 docker compose exec -T spark-gateway python3 -c \
   "import urllib.request; print(urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8090/jobs/validate-platform', method='POST'), timeout=3600).read().decode())"
@@ -112,6 +118,7 @@ python3 -m py_compile \
   airflow/dags/ecommerce_pipeline.py \
   airflow/dags/lakehouse_maintenance.py \
   kafka/producer/publish_orders.py \
+  cdc/*.py \
   monitoring/platform_exporter.py \
   spark/gateway/job_gateway.py \
   spark/jobs/*.py \
@@ -162,10 +169,11 @@ thành production deployment. Luôn truyền `--target` rõ ràng trong automati
 9. [Production integration](docs/learning/09-production-integration.md)
 10. [Monitoring và alerting](docs/learning/10-observability.md)
 11. [System verification và production trade-offs](docs/learning/11-verification-and-tradeoffs.md)
-12. [Kiến trúc logical và physical](docs/architecture.md)
-13. [Bản đồ code theo file](docs/code-map.md)
-14. [Runbook vận hành](docs/runbook.md)
-15. [Roadmap và phạm vi](ROADMAP.txt)
+12. [CDC với PostgreSQL và Debezium](docs/learning/12-cdc-debezium.md)
+13. [Kiến trúc logical và physical](docs/architecture.md)
+14. [Bản đồ code theo file](docs/code-map.md)
+15. [Runbook vận hành](docs/runbook.md)
+16. [Roadmap và phạm vi](ROADMAP.txt)
 
 ## Phạm vi production-shaped
 

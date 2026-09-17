@@ -17,6 +17,7 @@ niệm và trade-off rộng hơn.
 | 7 | `kafka/producer/publish_orders.py` | event identity/window được tạo thế nào? |
 | 8 | `spark/jobs/order_stream.py` | replay/checkpoint/DLQ hoạt động thế nào? |
 | 9 | `monitoring/platform_exporter.py` | health và freshness được đo thế nào? |
+| 10 | `cdc/bootstrap.py` | WAL capture được cấp quyền và deploy idempotently thế nào? |
 
 ## 2. Root và runtime definition
 
@@ -123,6 +124,17 @@ custom broker code.
 | `monitoring/alertmanager/alertmanager.yml` | route/group receiver local |
 | `monitoring/grafana/provisioning/` | datasource/dashboard provisioning |
 | `monitoring/grafana/dashboards/platform-overview.json` | dashboard source-controlled |
+
+## 8.1 CDC
+
+| File | Vai trò |
+| --- | --- |
+| `cdc/bootstrap.py` | tạo/rotate replication role, publication và PUT connector config |
+| `cdc/verify_cdc.py` | kiểm tra end-to-end `c/u/d` + delete tombstone |
+
+Debezium không nằm trong Airflow DAG. Nó là long-running Kafka Connect source
+connector đọc PostgreSQL WAL; Airflow batch extractor vẫn là owner của staging
+cho tới bước Bronze/Silver cutover.
 
 ## 9. CI
 

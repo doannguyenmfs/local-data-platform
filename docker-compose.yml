@@ -119,6 +119,19 @@ services:
     image: postgres:16
     container_name: local-data-platform-postgres
     restart: unless-stopped
+    # Debezium reads committed row changes from PostgreSQL WAL through the
+    # built-in pgoutput logical-decoding plug-in. max_slot_wal_keep_size is a
+    # local safety valve: a dead connector cannot retain WAL without limit.
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+      - -c
+      - max_slot_wal_keep_size=1024MB
     environment:
       POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
       POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
@@ -466,6 +479,103 @@ services:
       kafka:
         condition: service_healthy
 
+  # Kafka Connect hosts the Debezium PostgreSQL source connector. Connector
+  # offsets/config/status live in compacted Kafka internal topics, while the
+  # PostgreSQL replication slot retains the unread WAL position.
+  debezium-connect:
+    image: quay.io/debezium/connect:3.6.2.Final
+    container_name: local-data-platform-debezium-connect
+    profiles: ["streaming"]
+    restart: unless-stopped
+    environment:
+      BOOTSTRAP_SERVERS: kafka:19092
+      GROUP_ID: ecommerce-cdc-connect
+      CONFIG_STORAGE_TOPIC: ecommerce.connect.configs
+      OFFSET_STORAGE_TOPIC: ecommerce.connect.offsets
+      STATUS_STORAGE_TOPIC: ecommerce.connect.status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      # CONNECT_* properties are written verbatim into the worker config. Keep
+      # JSON schema envelopes for explicit type/optionality metadata; the next
+      # roadmap step can replace this verbose format with Schema Registry.
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "true"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "true"
+      CONNECT_TOPIC_CREATION_ENABLE: "true"
+      HEAP_OPTS: -Xms256m -Xmx768m
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl --fail --silent http://localhost:8083/connector-plugins >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    mem_limit: 1g
+
+  # This finite deployment step creates the least-privilege PostgreSQL role and
+  # publication, then PUTs the connector configuration through Connect REST.
+  # It is safe to run again after config changes or container recreation.
+  cdc-bootstrap:
+    build:
+      context: .
+      dockerfile: kafka/producer/Dockerfile
+    image: local-data-platform-order-producer:1.0.0
+    profiles: ["streaming"]
+    entrypoint: ["python", "/app/cdc/bootstrap.py"]
+    volumes:
+      # The image also COPYs this directory for CI/immutable deployment. This
+      # read-only mount shortens the local edit/test loop without rebuilding.
+      - ./cdc:/app/cdc:ro
+    environment:
+      ECOMMERCE_POSTGRES_HOST: postgres
+      ECOMMERCE_POSTGRES_PORT: ${ECOMMERCE_POSTGRES_PORT}
+      ECOMMERCE_POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
+      ECOMMERCE_POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
+      ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
+      CDC_POSTGRES_USER: ${CDC_POSTGRES_USER:-cdc_reader}
+      CDC_POSTGRES_PASSWORD: ${CDC_POSTGRES_PASSWORD:-cdc_local_password}
+      CDC_CONNECTOR_NAME: ${CDC_CONNECTOR_NAME:-ecommerce-postgres-cdc}
+      CDC_TOPIC_PREFIX: ${CDC_TOPIC_PREFIX:-ecommerce_cdc}
+      CDC_SLOT_NAME: ${CDC_SLOT_NAME:-ecommerce_cdc_slot}
+      CDC_PUBLICATION_NAME: ${CDC_PUBLICATION_NAME:-ecommerce_cdc_publication}
+      DEBEZIUM_CONNECT_URL: http://debezium-connect:8083
+    depends_on:
+      debezium-connect:
+        condition: service_healthy
+
+  # Manual destructive-safe verification: inserts, updates and then removes a
+  # unique test customer, requiring Debezium c/u/d and tombstone records.
+  cdc-smoke-test:
+    build:
+      context: .
+      dockerfile: kafka/producer/Dockerfile
+    image: local-data-platform-order-producer:1.0.0
+    profiles: ["tools"]
+    entrypoint: ["python", "/app/cdc/verify_cdc.py"]
+    volumes:
+      - ./cdc:/app/cdc:ro
+    environment:
+      ECOMMERCE_POSTGRES_HOST: postgres
+      ECOMMERCE_POSTGRES_PORT: ${ECOMMERCE_POSTGRES_PORT}
+      ECOMMERCE_POSTGRES_USER: ${ECOMMERCE_POSTGRES_USER}
+      ECOMMERCE_POSTGRES_PASSWORD: ${ECOMMERCE_POSTGRES_PASSWORD}
+      ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      CDC_TOPIC_PREFIX: ${CDC_TOPIC_PREFIX:-ecommerce_cdc}
+    depends_on:
+      cdc-bootstrap:
+        condition: service_completed_successfully
+
   order-producer:
     build:
       context: .
@@ -557,6 +667,9 @@ services:
       ECOMMERCE_POSTGRES_DB: ${ECOMMERCE_POSTGRES_DB}
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
       KAFKA_ORDER_TOPIC: ecommerce.order-events.v1
+      CDC_CONNECTOR_NAME: ${CDC_CONNECTOR_NAME:-ecommerce-postgres-cdc}
+      CDC_SLOT_NAME: ${CDC_SLOT_NAME:-ecommerce_cdc_slot}
+      DEBEZIUM_CONNECT_URL: http://debezium-connect:8083
       SPARK_GATEWAY_HEALTH_URL: http://spark-gateway:8090/health
       MINIO_HEALTH_URL: http://minio:9000/minio/health/live
       AIRFLOW_HEALTH_URL: http://airflow-api-server:8080/api/v2/monitor/health

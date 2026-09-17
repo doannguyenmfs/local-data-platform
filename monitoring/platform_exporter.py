@@ -47,6 +47,21 @@ KAFKA_PARTITIONS = Gauge(
     "Partition count for a required Kafka topic.",
     ["topic"],
 )
+CDC_CONNECTOR_UP = Gauge(
+    "cdc_connector_up",
+    "Whether the Debezium connector and every connector task are RUNNING.",
+    ["connector"],
+)
+CDC_SLOT_ACTIVE = Gauge(
+    "cdc_replication_slot_active",
+    "Whether PostgreSQL reports the logical replication slot as active.",
+    ["slot"],
+)
+CDC_SLOT_RETAINED_BYTES = Gauge(
+    "cdc_replication_slot_retained_bytes",
+    "Approximate WAL bytes retained from a logical slot restart LSN.",
+    ["slot"],
+)
 COLLECTION_ERRORS = Gauge(
     "platform_exporter_collection_errors",
     "Collection failures by subsystem during the latest cycle.",
@@ -100,6 +115,31 @@ def collect_postgres() -> None:
                 ):
                     cursor.execute(f"SELECT COUNT(*) FROM staging.{table}")
                     STAGING_ROWS.labels(table).set(cursor.fetchone()[0])
+
+                # A replication slot intentionally prevents PostgreSQL from
+                # deleting unread WAL. This is CDC durability, but an inactive
+                # or lagging slot can also fill the source database disk.
+                slot = env("CDC_SLOT_NAME", "ecommerce_cdc_slot")
+                cursor.execute(
+                    """
+                    SELECT
+                        active,
+                        COALESCE(
+                            pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn),
+                            0
+                        )
+                    FROM pg_replication_slots
+                    WHERE slot_name = %s
+                    """,
+                    (slot,),
+                )
+                slot_state = cursor.fetchone()
+                CDC_SLOT_ACTIVE.labels(slot).set(
+                    1 if slot_state is not None and slot_state[0] else 0
+                )
+                CDC_SLOT_RETAINED_BYTES.labels(slot).set(
+                    float(slot_state[1]) if slot_state is not None else 0
+                )
         COMPONENT_UP.labels("postgres").set(1)
         COLLECTION_ERRORS.labels("postgres").set(0)
     except Exception as error:  # exporter must stay alive and expose failure
@@ -142,10 +182,38 @@ def collect_kafka() -> None:
         COLLECTION_ERRORS.labels("kafka").set(1)
 
 
+def collect_debezium() -> None:
+    """Check connector/task state, not merely the Kafka Connect HTTP port."""
+    connector = env("CDC_CONNECTOR_NAME", "ecommerce-postgres-cdc")
+    base_url = env("DEBEZIUM_CONNECT_URL", "http://debezium-connect:8083")
+    try:
+        response = requests.get(
+            f"{base_url.rstrip('/')}/connectors/{connector}/status",
+            timeout=5,
+        )
+        response.raise_for_status()
+        status = response.json()
+        tasks = status.get("tasks", [])
+        running = (
+            status.get("connector", {}).get("state") == "RUNNING"
+            and bool(tasks)
+            and all(task.get("state") == "RUNNING" for task in tasks)
+        )
+        CDC_CONNECTOR_UP.labels(connector).set(1 if running else 0)
+        COMPONENT_UP.labels("debezium").set(1 if running else 0)
+        COLLECTION_ERRORS.labels("debezium").set(0)
+    except Exception as error:
+        print(f"debezium collection failed: {type(error).__name__}: {error}")
+        CDC_CONNECTOR_UP.labels(connector).set(0)
+        COMPONENT_UP.labels("debezium").set(0)
+        COLLECTION_ERRORS.labels("debezium").set(1)
+
+
 def collect() -> None:
     """Run collectors independently so one subsystem cannot hide the others."""
     collect_postgres()
     collect_kafka()
+    collect_debezium()
     collect_http("spark_gateway", env("SPARK_GATEWAY_HEALTH_URL"))
     collect_http("minio", env("MINIO_HEALTH_URL"))
     collect_http("airflow", env("AIRFLOW_HEALTH_URL"))

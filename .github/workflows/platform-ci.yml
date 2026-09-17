@@ -9,6 +9,7 @@ on:
       - "airflow/**"
       - "spark/**"
       - "kafka/**"
+      - "cdc/**"
       - "monitoring/**"
       - "docker-compose.yml"
       - ".env.example"
@@ -19,6 +20,7 @@ on:
       - "airflow/**"
       - "spark/**"
       - "kafka/**"
+      - "cdc/**"
       - "monitoring/**"
       - "docker-compose.yml"
       - ".env.example"
@@ -54,6 +56,7 @@ jobs:
             spark/tests \
             spark/gateway \
             kafka/producer \
+            cdc \
             monitoring
 
       - name: Validate Compose

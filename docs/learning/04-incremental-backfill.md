@@ -88,8 +88,10 @@ thấy row còn tồn tại. dbt snapshot có thể invalidate hard delete khi s
 source hiện tại, nhưng extract deletion cần tombstone/CDC hoặc periodic full-key
 reconciliation.
 
-Project hiện chưa biến hard delete source thành staging tombstone. Đây là giới
-hạn có chủ đích, được ghi rõ thay vì giả vờ incremental timestamp giải quyết.
+Level 12 đã capture hard delete mới của `public.customers` vào raw Kafka CDC
+topic. Staging chưa consume topic để giữ single-writer ownership; bước
+Bronze/Silver sẽ materialize rồi cut over. Các table khác vẫn là deferred risk,
+được ghi rõ thay vì giả vờ incremental timestamp giải quyết.
 
 ## Late-arriving data
 

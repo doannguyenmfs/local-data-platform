@@ -1,6 +1,6 @@
 # LOCAL DATA PLATFORM — ROADMAP
 
-Trạng thái: COMPLETE (local production-shaped learning platform)
+Trạng thái: ADVANCED IN PROGRESS (core complete; CDC complete)
 Xác minh end-to-end gần nhất: 2026-09-17
 
 | Level | Chủ đề | Kết quả |
@@ -16,8 +16,9 @@ Xác minh end-to-end gần nhất: 2026-09-17
 | 9 | Production integration | Airflow điều phối dbt + Spark + Kafka |
 | 10 | Observability | semantic metrics, Prometheus, alerts, Grafana |
 | 11 | Delivery | container validation, GitHub Actions, runbook |
+| 12 | CDC | PostgreSQL WAL, Debezium, slot/publication, c/u/d/tombstone |
 
-Tài liệu học tương ứng nằm trong `docs/learning/01-*.md` đến `11-*.md`.
+Tài liệu học tương ứng nằm trong `docs/learning/01-*.md` đến `12-*.md`.
 Topology logical/physical nằm tại `docs/architecture.md`; trách nhiệm từng file
 nằm tại `docs/code-map.md`; thao tác vận hành nằm tại `docs/runbook.md`.
 
@@ -28,6 +29,7 @@ extract -> validate -> [dbt, Iceberg batch, Kafka publish] -> advance watermark
                                       Kafka -> Spark stream -> Iceberg
 weekly maintenance DAG -> compact files + expire old Iceberg snapshots
 all components -> exporter -> Prometheus -> Grafana / Alertmanager
+PostgreSQL WAL -> Debezium Connect -> compacted raw CDC topics
 ```
 
 ## Definition of done
@@ -42,6 +44,8 @@ all components -> exporter -> Prometheus -> Grafana / Alertmanager
   và DLQ.
 - CI dựng môi trường tối thiểu, chạy test và build toàn bộ image.
 - Dashboard/alert theo dõi cả hạ tầng lẫn độ tươi dữ liệu.
+- CDC dùng replication role riêng, publication allow-list, durable slot/offset,
+  smoke test delete và alert WAL retention.
 - README và runbook đủ để khởi động, kiểm tra và phục hồi mà không đọc source.
 
 ## Deferred / accepted risks
@@ -50,8 +54,16 @@ all components -> exporter -> Prometheus -> Grafana / Alertmanager
 
 Record xuất hiện muộn nhưng có `updated_at` cũ hơn committed watermark sẽ không
 được scheduled incremental run chọn. Tần suất hiện được coi là rất thấp nên xử
-lý bằng explicit backfill. Khi có SLA thực, bổ sung ingestion timestamp hoặc CDC,
-lookback window có dedupe và metric đo source latency.
+lý bằng explicit backfill. CDC hiện capture mọi commit mới của customer không
+phụ thuộc `updated_at`; các table batch còn lại vẫn cần ingestion timestamp,
+lookback window có dedupe hoặc mở rộng publication sau capacity review.
+
+### CDC cutover chưa thực hiện
+
+Hard delete customer đã có trong raw Kafka CDC topic nhưng chưa được áp vào
+`staging.customers`. Batch extractor vẫn là single writer của staging. Bước
+Bronze/Silver sẽ consume envelope, reconcile và cut over source ownership trước
+khi retire customer watermark; không chạy hai writer âm thầm trên cùng table.
 
 ### Local-only constraints
 
@@ -64,7 +76,7 @@ lookback window có dedupe và metric đo source latency.
 
 ## Hướng phát triển sau project
 
-Các mục sau không còn là điều kiện hoàn thành project học tập, nhưng là bước nâng
-cấp hợp lý: CDC bằng Debezium, schema registry/data contracts, OpenLineage, IaC
-và Kubernetes, object-store versioning/backup, HA, TLS/SASL/RBAC, cost/performance
-benchmark và SLO/error-budget.
+Các bước nâng cấp tiếp theo: Schema Registry/data contracts, Bronze/Silver CDC
+materialization và cutover, event-time/late-data streaming, dbt model contracts
+và slim CI, OpenLineage/catalog, anomaly detection, performance benchmark,
+TLS/SASL/RBAC, backup/DR, IaC và Kubernetes.

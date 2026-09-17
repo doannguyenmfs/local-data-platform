@@ -23,8 +23,8 @@ docker compose ps
 
 Trạng thái mong đợi:
 
-- PostgreSQL, Redis, Kafka và MinIO healthy.
-- `airflow-init`, `minio-init`, `kafka-init` exited với code 0; đây là đúng vì
+- PostgreSQL, Redis, Kafka, Debezium Connect và MinIO healthy.
+- `airflow-init`, `minio-init`, `kafka-init`, `cdc-bootstrap` exited với code 0; đây là đúng vì
   chúng là init job.
 - Airflow services, Spark master/worker/gateway, order stream, exporter,
   Prometheus, Alertmanager và Grafana đang running.
@@ -33,6 +33,7 @@ Kiểm tra nhanh:
 
 ```bash
 curl --fail http://localhost:8090/health
+curl --fail http://localhost:8083/connectors/ecommerce-postgres-cdc/status
 curl --fail http://localhost:9100/metrics
 curl --fail http://localhost:9090/-/healthy
 curl --fail http://localhost:3000/api/health
@@ -101,6 +102,21 @@ docker compose exec -T kafka \
   --all-groups --describe
 ```
 
+CDC connector và PostgreSQL slot:
+
+```bash
+curl --fail http://localhost:8083/connectors/ecommerce-postgres-cdc/status
+
+docker compose exec -T postgres psql \
+  -U "$ECOMMERCE_POSTGRES_USER" -d "$ECOMMERCE_POSTGRES_DB" \
+  -c "select slot_name, active, restart_lsn, confirmed_flush_lsn, pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) as retained_bytes from pg_replication_slots;"
+
+docker compose --profile '*' run --rm --no-deps cdc-smoke-test
+```
+
+Smoke test phải thấy `operations=c,u,d; delete_tombstone=true`. Nó dùng customer
+UUID riêng và delete source row sau cùng.
+
 Kiểm tra grain và row count của toàn bộ bảng Iceberg qua allow-listed gateway:
 
 ```bash
@@ -121,6 +137,8 @@ Kết quả phải có `return_code: 0`; `row_count` phải bằng
 | Producer fail giữa batch | Kafka/producer logs | retry; event ID ổn định, sink merge dedupe |
 | Stream restart loop | `order-stream` logs, DLQ | sửa schema/config, giữ checkpoint, restart service |
 | Consumer lag tăng | consumer group describe | tăng resource/partition hoặc giảm producer rate |
+| Debezium task `FAILED` | Connect status `tasks[].trace` | sửa privilege/config rồi chạy lại `cdc-bootstrap` |
+| CDC slot inactive/WAL tăng | `pg_replication_slots`, exporter metrics | khôi phục Connect trước safety cap; không drop slot để né alert |
 | Candidate treo | Prometheus alert + Airflow run | xử lý downstream; không advance watermark bằng tay |
 | MinIO đầy | bucket usage, Iceberg snapshots | chạy maintenance; tăng disk trước khi ingest lại |
 | Grafana trống | Prometheus targets | sửa exporter/scrape trước, không sửa dashboard vội |
@@ -131,6 +149,7 @@ Lệnh log thường dùng:
 docker compose logs --tail=200 airflow-worker
 docker compose logs --tail=200 spark-gateway spark-master spark-worker
 docker compose logs --tail=200 order-stream kafka
+docker compose logs --tail=200 debezium-connect cdc-bootstrap
 docker compose logs --tail=200 platform-exporter prometheus
 ```
 
@@ -186,7 +205,9 @@ Local lab chưa tự động backup. Trước migration hoặc reset:
 2. Sao chép MinIO `warehouse` bucket bằng `mc mirror` sang vị trí ngoài Compose
    volume.
 3. Ghi lại Kafka offsets/retention; Kafka volume không thay cho archival backup.
-4. Kiểm thử restore vào volume/database khác. Backup chưa restore thử chưa được
+4. Với CDC, ghi lại connector config, slot/publication và phối hợp PostgreSQL
+   restore point với Kafka Connect offset topics.
+5. Kiểm thử restore vào volume/database khác. Backup chưa restore thử chưa được
    coi là backup đáng tin cậy.
 
 ## 8. Monitoring triage
