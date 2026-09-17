@@ -19,6 +19,8 @@ JOBS = {
     "iceberg-maintenance": ["/opt/spark/jobs/maintain_iceberg.py"],
     "validate-platform": ["/opt/spark/jobs/validate_platform.py"],
 }
+# The mapping is the security boundary: requests choose a capability name, not
+# a script path or arbitrary command.  Adding a job requires a code review.
 SPARK_SUBMIT = "/opt/spark/bin/spark-submit"
 SPARK_MASTER = "spark://spark-master:7077"
 JOB_TIMEOUT_SECONDS = 60 * 60
@@ -26,9 +28,12 @@ job_lock = threading.Lock()
 
 
 class JobGatewayHandler(BaseHTTPRequestHandler):
+    """Minimal synchronous API used by Airflow and operator validation calls."""
+
     server_version = "LocalDataPlatformJobGateway/1.0"
 
     def send_json(self, status: HTTPStatus, payload: dict) -> None:
+        """Write a complete JSON response with an explicit byte length."""
         encoded = json.dumps(payload).encode("utf-8")
         self.send_response(status.value)
         self.send_header("Content-Type", "application/json")
@@ -37,12 +42,14 @@ class JobGatewayHandler(BaseHTTPRequestHandler):
         self.wfile.write(encoded)
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+        """Report process liveness and whether a finite job currently owns it."""
         if self.path != "/health":
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
         self.send_json(HTTPStatus.OK, {"status": "ok", "busy": job_lock.locked()})
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+        """Run one allow-listed job; reject concurrent submissions on this lab."""
         prefix = "/jobs/"
         if not self.path.startswith(prefix):
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
@@ -55,10 +62,17 @@ class JobGatewayHandler(BaseHTTPRequestHandler):
                 {"error": "unknown_job", "allowed_jobs": sorted(JOBS)},
             )
             return
+        # A single local worker cannot safely host two memory-heavy finite jobs
+        # plus the stream.  Return 409 so Airflow can retry instead of queueing
+        # an unbounded number of driver subprocesses inside this container.
         if not job_lock.acquire(blocking=False):
             self.send_json(HTTPStatus.CONFLICT, {"error": "gateway_busy"})
             return
 
+        # Client deploy mode keeps the Python driver here.  Spark standalone
+        # does not support Python cluster deploy mode; executors still run on
+        # spark-worker.  Explicit driver host/bind settings make it reachable
+        # from the executor across the Compose network.
         command = [
             SPARK_SUBMIT,
             "--master",
@@ -78,6 +92,8 @@ class JobGatewayHandler(BaseHTTPRequestHandler):
             *job_args,
         ]
         try:
+            # Merge stderr into stdout so Airflow receives one chronological
+            # log tail.  The full Spark logs remain in container logs.
             result = subprocess.run(
                 command,
                 check=False,
@@ -106,6 +122,8 @@ class JobGatewayHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    # Threaded HTTP handling keeps /health responsive; job_lock still permits
+    # only one POST job at a time.
     server = ThreadingHTTPServer(("0.0.0.0", 8090), JobGatewayHandler)
     print("Spark job gateway listening on 0.0.0.0:8090")
     server.serve_forever()

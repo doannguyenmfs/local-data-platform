@@ -1,4 +1,10 @@
-"""Expose platform health and data-pipeline state as Prometheus metrics."""
+"""Expose platform health and pipeline semantics as Prometheus metrics.
+
+The exporter intentionally survives dependency failures.  A monitoring process
+that exits whenever Kafka/PostgreSQL is down cannot report *which* dependency
+failed.  Each collector therefore converts its own exception into component
+and collection-error gauges while the HTTP metrics endpoint stays available.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +19,9 @@ from confluent_kafka.admin import AdminClient
 from prometheus_client import Gauge, start_http_server
 
 
+# Labels are bounded component/pipeline/table names.  Business identifiers are
+# intentionally excluded because unbounded labels create a time-series cardinality
+# explosion in Prometheus.
 COMPONENT_UP = Gauge(
     "platform_component_up",
     "Whether the platform component passed its semantic health check.",
@@ -46,6 +55,7 @@ COLLECTION_ERRORS = Gauge(
 
 
 def env(name: str, default: Optional[str] = None) -> str:
+    """Return mandatory config while keeping credentials out of log output."""
     value = os.getenv(name, default)
     if not value:
         raise ValueError(f"Missing required environment variable: {name}")
@@ -53,6 +63,7 @@ def env(name: str, default: Optional[str] = None) -> str:
 
 
 def collect_postgres() -> None:
+    """Collect committed freshness, pending batches and staging volume."""
     try:
         with psycopg.connect(
             host=env("ECOMMERCE_POSTGRES_HOST"),
@@ -69,6 +80,8 @@ def collect_postgres() -> None:
                     FROM metadata.etl_watermark
                     """
                 )
+                # Freshness is measured from the committed watermark.  Candidate
+                # state is not yet safe for consumers and has its own gauge.
                 now = datetime.now(timezone.utc)
                 for pipeline, watermark, candidate in cursor:
                     WATERMARK_LAG.labels(pipeline).set(
@@ -96,6 +109,7 @@ def collect_postgres() -> None:
 
 
 def collect_http(component: str, url: str) -> None:
+    """Convert one dependency's HTTP liveness endpoint into semantic health."""
     try:
         response = requests.get(url, timeout=5)
         response.raise_for_status()
@@ -108,6 +122,7 @@ def collect_http(component: str, url: str) -> None:
 
 
 def collect_kafka() -> None:
+    """Verify the required topic exists and expose its bounded partition count."""
     topic = env("KAFKA_ORDER_TOPIC", "ecommerce.order-events.v1")
     try:
         admin = AdminClient(
@@ -128,6 +143,7 @@ def collect_kafka() -> None:
 
 
 def collect() -> None:
+    """Run collectors independently so one subsystem cannot hide the others."""
     collect_postgres()
     collect_kafka()
     collect_http("spark_gateway", env("SPARK_GATEWAY_HEALTH_URL"))
@@ -140,6 +156,8 @@ def main() -> None:
     interval = int(env("COLLECTION_INTERVAL_SECONDS", "15"))
     start_http_server(port)
     print(f"Platform exporter listening on :{port}/metrics")
+    # Collection happens on a fixed cadence independent from Prometheus scrape
+    # timing.  Scrapes remain cheap and do not fan out to every dependency.
     while True:
         started_at = time.monotonic()
         collect()

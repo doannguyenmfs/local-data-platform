@@ -1,3 +1,7 @@
+{#
+  Grain: one row per order item. MERGE updates a business row rather than
+  appending a duplicate when Airflow retries the same staging batch.
+#}
 {{
     config(
         materialized='incremental',
@@ -10,7 +14,7 @@
             {'columns': ['product_id']},
             {'columns': ['source_loaded_at']}
         ]
-)
+    )
 }}
 
 {#
@@ -45,6 +49,7 @@ with sales_order_items as (
 
     from {{ ref('int_sales_order_items') }}
 
+    {# Business date is not an ingestion cursor: historical orders may change. #}
     {% if is_incremental() and target_state.has_source_loaded_at %}
 
     where source_loaded_at > coalesce(
@@ -77,6 +82,8 @@ earliest_customer_versions as (
 
     from (
 
+        -- Seed data may contain orders older than the first captured snapshot.
+        -- Rank one deterministic fallback version rather than dropping facts.
         select
             customer_sk,
             customer_id,
@@ -98,6 +105,8 @@ earliest_customer_versions as (
 
 , existing_facts as (
 
+    -- Preserve the previous date only when a changed item crosses a day. The
+    -- downstream daily mart uses it to repair the now-stale old partition.
     select
         order_item_id,
         order_date
@@ -151,6 +160,7 @@ earliest_customer_versions as (
 
     from sales_order_items as sales
 
+    -- Half-open validity ranges ensure one version owns an exact boundary.
     left join customer_versions as matching_customer_version
         on sales.customer_id = matching_customer_version.customer_id
         and sales.order_date >= matching_customer_version.valid_from

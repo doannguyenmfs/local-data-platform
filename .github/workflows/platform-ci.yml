@@ -1,3 +1,5 @@
+# Fast platform gates: syntax/config validation, pure Spark tests and image
+# reproducibility. Full stateful end-to-end runs remain a separate local gate.
 name: Platform CI
 
 on:

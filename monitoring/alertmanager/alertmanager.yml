@@ -1,3 +1,5 @@
+# Local receiver intentionally has no external webhook/email credentials. Alerts
+# remain visible in the UI; production should add a secret-backed team receiver.
 route:
   receiver: local-ui
   group_by: [alertname, severity]

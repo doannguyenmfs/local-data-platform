@@ -1,3 +1,7 @@
+{#
+  Build the reusable order-item sales grain. Inner join requires a valid order
+  header; left join keeps items with no payment attempts and labels them unpaid.
+#}
 {{ config(materialized='view') }}
 
 select
@@ -18,6 +22,8 @@ select
         payments.payment_attempt_count,
         0
     ) as payment_attempt_count,
+    -- Incremental marts must react when the order, item or payment aggregate
+    -- changes, so propagate the latest platform load time across all inputs.
     greatest(
         orders.loaded_at,
         order_items.loaded_at,

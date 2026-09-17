@@ -1,4 +1,10 @@
-"""Build an order-item sales dataset from PostgreSQL staging with PySpark."""
+"""Build an order-item sales dataset from PostgreSQL staging with PySpark.
+
+This is the plain-Parquet teaching job.  It isolates read, pure transformation,
+validation and write so the business logic can be unit-tested without external
+services.  ``iceberg_sales.py`` reuses the same functions but replaces the
+non-transactional overwrite sink with an Iceberg table.
+"""
 
 from __future__ import annotations
 
@@ -33,7 +39,12 @@ def read_staging_table(
     config: dict[str, str],
     table_name: str,
 ) -> DataFrame:
-    """Read a staging table through JDBC using a projection-friendly subquery."""
+    """Read one current-state staging table through PostgreSQL JDBC.
+
+    The UUID business keys are poor range-partition columns, so this lab avoids
+    fake JDBC parallelism that would produce overlapping/full-table scans.
+    ``fetchsize`` still reduces network round trips.
+    """
     jdbc_url = (
         f"jdbc:postgresql://{config['ECOMMERCE_POSTGRES_HOST']}:"
         f"{config['ECOMMERCE_POSTGRES_PORT']}/{config['ECOMMERCE_POSTGRES_DB']}"
@@ -55,7 +66,9 @@ def transform_sales(
     order_items: DataFrame,
     payments: DataFrame,
 ) -> DataFrame:
-    """Return one enriched row per order item."""
+    """Return one enriched row per order item without performing external I/O."""
+    # Payments are one-to-many with orders.  Aggregate before the item join or
+    # every payment attempt would multiply every order item and break the grain.
     payment_metrics = payments.groupBy("order_id").agg(
         F.count("payment_id").alias("payment_attempt_count"),
         F.sum(
@@ -76,6 +89,8 @@ def transform_sales(
         .otherwise(F.lit("unpaid")),
     )
 
+    # The inner header/item join preserves valid item grain.  Payment remains a
+    # left join because an unpaid/new order may have no payment attempts yet.
     sales = (
         orders.alias("orders")
         .join(
@@ -107,6 +122,8 @@ def transform_sales(
             F.coalesce(F.col("payments.payment_attempt_count"), F.lit(0)).alias(
                 "payment_attempt_count"
             ),
+            # Downstream incremental work must react when *any* contributing
+            # staging relation changes, hence the greatest load timestamp.
             F.greatest(
                 F.col("orders.loaded_at"),
                 F.col("items.loaded_at"),
@@ -122,6 +139,7 @@ def transform_sales(
 
 def validate_sales(sales: DataFrame) -> dict[str, int]:
     """Fail the job before writing when grain or core measures are invalid."""
+    # One aggregate action computes all control totals in a single pass.
     metrics = sales.agg(
         F.count(F.lit(1)).alias("row_count"),
         F.countDistinct("order_item_id").alias("distinct_order_item_count"),
@@ -173,6 +191,8 @@ def main() -> None:
     spark.sparkContext.setLogLevel("WARN")
 
     try:
+        # Validation and write are separate actions.  Persist prevents Spark
+        # from rereading JDBC and recomputing the joins for the second action.
         sales = transform_sales(
             read_staging_table(spark, config, "orders"),
             read_staging_table(spark, config, "order_items"),
@@ -180,6 +200,9 @@ def main() -> None:
         ).persist()
         metrics = validate_sales(sales)
         (
+            # Repartition controls execution distribution; partitionBy controls
+            # the physical directory layout.  Date has bounded, query-friendly
+            # cardinality unlike UUID identifiers.
             sales.repartition("sales_date")
             .write.mode("overwrite")
             .partitionBy("sales_date")

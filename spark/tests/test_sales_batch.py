@@ -1,4 +1,9 @@
-"""Executable unit tests for the pure Spark sales transformation."""
+"""Executable unit tests for the pure Spark sales transformation.
+
+External PostgreSQL/MinIO I/O is intentionally absent; integration tests cover
+those boundaries while this file provides fast, deterministic business-logic
+feedback in an in-process local SparkSession.
+"""
 
 from __future__ import annotations
 

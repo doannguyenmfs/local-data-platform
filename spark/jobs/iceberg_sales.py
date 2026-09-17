@@ -1,4 +1,10 @@
-"""Merge PostgreSQL staging sales into an ACID Iceberg table."""
+"""Incrementally publish the order-item sales grain to an ACID Iceberg table.
+
+The job reuses the tested sales transformation, filters by the maximum
+``source_loaded_at`` already committed to Iceberg, validates candidate rows and
+then chooses append, MERGE or no-op.  It prints machine-readable control totals
+so Airflow/operator logs contain evidence of what was committed.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +22,7 @@ TABLE_NAME = "local.ecommerce.fact_sales"
 
 
 def create_table(spark) -> None:
+    """Create the namespace/table contract without replacing existing state."""
     spark.sql("CREATE NAMESPACE IF NOT EXISTS local.ecommerce")
     spark.sql(
         f"""
@@ -35,6 +42,8 @@ def create_table(spark) -> None:
             source_loaded_at TIMESTAMP
         )
         USING iceberg
+        -- Hidden day partitioning enables date pruning without exposing a
+        -- physical directory column as part of the consumer contract.
         PARTITIONED BY (days(order_date))
         TBLPROPERTIES (
             'format-version' = '2',
@@ -54,9 +63,13 @@ def write_sales(spark, updates, table_is_empty: bool) -> str:
     subsequent loads retain the idempotent MERGE contract.
     """
     if table_is_empty:
+        # Repartition by the user-visible date improves the first snapshot's
+        # file distribution.  Iceberg still owns hidden partition metadata.
         updates.repartition("sales_date").writeTo(TABLE_NAME).append()
         return "append"
 
+    # The temporary view exists only in this SparkSession and lets SQL MERGE use
+    # the DataFrame result without materializing an intermediate table.
     updates.createOrReplaceTempView("sales_updates")
     spark.sql(
         f"""
@@ -74,6 +87,7 @@ def write_sales(spark, updates, table_is_empty: bool) -> str:
 
 
 def validate_table(spark) -> dict[str, Any]:
+    """Verify persisted grain and return the latest snapshot audit metadata."""
     metrics = spark.sql(
         f"""
         SELECT
@@ -107,11 +121,15 @@ def main() -> None:
     spark.sparkContext.setLogLevel("WARN")
     try:
         create_table(spark)
+        # `limit(1)` avoids a full count just to choose the initial-write path.
         table_is_empty = spark.table(TABLE_NAME).limit(1).count() == 0
         current_high_watermark = (
             spark.table(TABLE_NAME).agg(F.max("source_loaded_at")).first()[0]
             or datetime(1900, 1, 1, tzinfo=timezone.utc)
         )
+        # A strict `>` is safe because a committed source_loaded_at is already
+        # represented in the table.  If there are zero candidates, skip writing
+        # entirely so a scheduler no-op does not create metadata-only snapshots.
         updates = transform_sales(
             read_staging_table(spark, config, "orders"),
             read_staging_table(spark, config, "order_items"),
@@ -133,6 +151,8 @@ def main() -> None:
             )
         )
     finally:
+        # Always stop the driver, including validation/MERGE exceptions, so the
+        # standalone master releases application resources.
         spark.stop()
 
 

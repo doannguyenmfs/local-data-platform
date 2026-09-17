@@ -1,7 +1,11 @@
+# One logical profile exposes three explicit deployment targets. All secrets and
+# host-dependent addresses come from environment variables; models stay target
+# agnostic and `ref()` resolves relations into the selected schema.
 local_data_platform:
   target: dev
   outputs:
     dev:
+      # Local iteration schema. Four threads match the laptop-sized database.
       type: postgres
       host: "{{ env_var('ECOMMERCE_POSTGRES_HOST') }}"
       port: "{{ env_var('ECOMMERCE_POSTGRES_HOST_PORT') | int }}"
@@ -12,6 +16,7 @@ local_data_platform:
       threads: 4
       connect_timeout: 10
     ci:
+      # Disposable schema populated by deterministic GitHub Actions fixtures.
       type: postgres
       host: "{{ env_var('ECOMMERCE_POSTGRES_HOST') }}"
       port: "{{ env_var('ECOMMERCE_POSTGRES_HOST_PORT') | int }}"
@@ -22,6 +27,8 @@ local_data_platform:
       threads: 4
       connect_timeout: 10
     prod:
+      # Production-shaped name/threads only; the local Compose topology is not
+      # made production-ready merely by selecting this target.
       type: postgres
       host: "{{ env_var('ECOMMERCE_POSTGRES_HOST') }}"
       port: "{{ env_var('ECOMMERCE_POSTGRES_HOST_PORT') | int }}"

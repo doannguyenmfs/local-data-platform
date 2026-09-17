@@ -1,4 +1,8 @@
-"""Unit tests for order-event envelope parsing without a Kafka broker."""
+"""Unit tests for order-event envelope parsing without a Kafka broker.
+
+The test supplies rows shaped like Spark's Kafka source, so parser behavior can
+be verified without Kafka, checkpoints or an Iceberg catalog.
+"""
 
 from __future__ import annotations
 

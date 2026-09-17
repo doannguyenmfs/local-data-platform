@@ -41,10 +41,30 @@ ecommerce.order-events.v1 (3 partitions)
 Kafka key là `order_id`; vì vậy các event của cùng order vào cùng partition và
 giữ thứ tự trong partition. Kafka không bảo đảm thứ tự toàn topic.
 
+Topic có 3 partitions để minh họa parallelism/key ordering. Local chỉ có một
+broker nên ba partition vẫn nằm cùng node; chúng tăng logical concurrency chứ
+không tạo fault tolerance. Replication factor 1 là hệ quả của one-broker lab.
+
 `event_id` được tạo từ `(order_id, source_updated_at)` bằng UUID5. Replay cùng
 source version sinh cùng id, cho phép sink dedupe. Producer idempotence giảm
 duplicate do retry trong một producer session; deterministic id và Iceberg
 merge bảo vệ qua nhiều lần chạy producer.
+
+UUID5 khác UUID4 ở tính quyết định: cùng namespace/name luôn ra cùng id. Nếu chỉ
+dùng UUID4, chạy producer lần hai sẽ tạo event identity mới và sink không biết đó
+là replay hay business version mới.
+
+## Producer đọc window nào?
+
+Scheduled run đọc `(watermark_value, candidate_value]` của `staging_orders`.
+Candidate đã được extract task chụp trước, nên retry đọc đúng batch chưa commit.
+Backfill dùng `[start, end)` explicit. Producer sort theo `updated_at, order_id`
+để output dễ quan sát; correctness không dựa vào global publish order.
+
+`acks=all` yêu cầu broker xác nhận theo durability policy; `enable.idempotence`
+bảo vệ duplicate do network retry trong producer session. Sau `flush()`, code
+so sánh delivered count và errors; enqueue vào client buffer chưa được coi là
+publish thành công.
 
 ## Structured Streaming hoạt động thế nào?
 
@@ -72,6 +92,18 @@ thái bị upsert thường xuyên hơn `copy-on-write`, vốn phải rewrite da
 vẫn dùng copy-on-write. Lần nạp đầu vào bảng rỗng dùng append; từ lần sau mới
 MERGE để tránh dựng row-level plan không cần thiết.
 
+## Vì sao vừa checkpoint vừa MERGE?
+
+Checkpoint giúp Spark nhớ offset, query plan state và micro-batch progress. Nó
+giảm replay bình thường nhưng không xóa crash window giữa “sink đã commit” và
+“checkpoint đã ghi”. MERGE bằng stable key đóng crash window đó ở output. Chỉ
+checkpoint mà append sink vẫn có thể duplicate; chỉ MERGE mà không checkpoint sẽ
+đọc lại quá nhiều và mất progress/state operational.
+
+Trong một micro-batch, `dropDuplicates(event_id)` xử lý duplicate nội batch.
+Iceberg MERGE xử lý duplicate xuyên batch/restart. Hai lớp giải quyết hai phạm vi
+khác nhau.
+
 ## Chạy demo one-shot
 
 ```bash
@@ -80,8 +112,8 @@ docker compose \
   up -d --build \
   postgres minio minio-init kafka kafka-init spark-master spark-worker
 
-docker compose run --rm order-producer
-docker compose run --rm order-stream-once
+docker compose --profile '*' run --rm --no-deps order-producer
+docker compose --profile '*' run --rm --no-deps order-stream-once
 ```
 
 Chạy lại cả hai lệnh. Số row của `order_events` không được tăng nếu source
@@ -106,6 +138,11 @@ docker compose \
 - JSON thuận tiện để học nhưng production thường dùng Schema Registry với
   Avro/Protobuf/JSON Schema để enforce compatibility tập trung.
 
+Consumer hiện chỉ chấp nhận `event_type='order.upserted'` và
+`schema_version=1`. Event parse lỗi/thiếu key/version khác được giữ nguyên raw
+payload và Kafka coordinates trong DLQ, thay vì silent drop hoặc làm stream dừng
+mãi trên poison pill.
+
 ## Lưu ý production
 
 - Topic local có replication factor 1; mất volume/broker là mất availability và
@@ -122,6 +159,21 @@ docker compose \
 - Producer demo đọc đúng candidate watermark window của `staging_orders`; retry
   đọc lại cùng window và sinh cùng event id. Production nên dùng transactional
   outbox hoặc CDC thay vì dual-write database + Kafka trong application.
+
+## Vì sao chưa dùng transactional outbox?
+
+Source demo không có application transaction viết cả order và outbox. Airflow
+đọc current-state staging rồi publish; watermark barrier + deterministic event
+id làm retry an toàn nhưng vẫn là batch-derived event, không phải source event
+log chính chủ. Production cần outbox/CDC khi yêu cầu không bỏ lỡ mọi mutation và
+ordering theo database commit log.
+
+## File cần đọc
+
+- `kafka/producer/publish_orders.py`: window, envelope, UUID5, delivery ack.
+- `spark/jobs/order_stream.py`: schema, validation, foreachBatch, three sinks.
+- `spark/tests/test_order_stream.py`: parser contract không cần Kafka broker.
+- `docker-compose.yml`: KRaft listener, 3 partitions, 7-day retention, RF=1.
 
 ## Câu hỏi phỏng vấn
 

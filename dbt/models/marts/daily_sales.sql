@@ -1,3 +1,7 @@
+{#
+  Grain: one row per sales date. Recalculate only dates touched by new fact
+  versions, but MERGE the complete result for each affected date.
+#}
 {{
     config(
         materialized='incremental',
@@ -7,9 +11,14 @@
         post_hook=[
             "delete from {{ this }} as daily where not exists (select 1 from {{ ref('fact_sales') }} as fact where fact.order_date::date = daily.sales_date)"
         ]
-)
+    )
 }}
 
+{#
+  Upgrade guard: a target created before max_source_loaded_at existed cannot be
+  used for incremental filtering. Let dbt sync the column during one full-path
+  run, then enable the normal high-water branch on later runs.
+#}
 {% set target_state = namespace(has_max_source_loaded_at=false) %}
 {% if is_incremental() %}
     {% for column in adapter.get_columns_in_relation(this) %}
@@ -30,6 +39,8 @@ with affected_dates as (
         '1900-01-01 00:00:00+00'::timestamptz
     )
 
+    -- If a fact moves from day A to B, both dates must be recomputed. UNION
+    -- removes duplicates when many changed rows touch the same date.
     union
 
     select previous_order_date::date as sales_date
@@ -67,6 +78,8 @@ daily_metrics as (
 
     from {{ ref('fact_sales') }} as fact_sales
 
+    -- Recompute complete affected days from canonical fact state. Incrementing
+    -- only changed amounts would be difficult to reverse safely on retries.
     inner join affected_dates
         on fact_sales.order_date::date = affected_dates.sales_date
 

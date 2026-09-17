@@ -1,3 +1,14 @@
+"""Daily ecommerce orchestration DAG.
+
+This file is deliberately a control-plane module: it defines ordering, retry
+boundaries and the watermark commit barrier.  Business transformations stay in
+dbt/Spark, while durable data stays in PostgreSQL, Kafka and Iceberg.
+
+Importing the module must remain side-effect free.  Airflow's DAG processor
+imports it repeatedly, so database/network work belongs inside ``@task``
+functions, never at module scope.
+"""
+
 from datetime import datetime, timedelta
 import os
 import subprocess
@@ -7,6 +18,9 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import Param, dag, task
 
 
+# Runtime boundaries are configured through Airflow/environment rather than
+# embedding credentials here.  The absolute executable paths avoid ambiguity
+# between Airflow's framework Python and the isolated dbt/producer virtualenv.
 POSTGRES_CONN_ID = "ecommerce_postgres"
 DBT_EXECUTABLE = "/opt/dbt-venv/bin/dbt"
 DBT_PROJECT_DIR = os.getenv("DBT_PROJECT_DIR", "/opt/airflow/dbt")
@@ -32,7 +46,14 @@ def extract_incremental(
     backfill_start=None,
     backfill_end=None,
 ):
-    """Upsert one closed source window and prepare its incremental watermark."""
+    """Upsert one closed source window and prepare its candidate watermark.
+
+    Scheduled runs read ``(committed_watermark, source_max_updated_at]``.
+    Backfills read the explicit half-open interval ``[start, end)`` and do not
+    touch candidate state.  The table/column arguments are controlled by the
+    DAG code below, not supplied by users, which is why identifiers can be
+    interpolated while all timestamp values remain bound SQL parameters.
+    """
     hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
     pipeline_name = f"staging_{table_name}"
 
@@ -47,6 +68,9 @@ def extract_incremental(
     if watermark_row is None:
         raise ValueError(f"Missing watermark for pipeline: {pipeline_name}")
 
+    # Half-open backfill windows compose without double-counting the boundary.
+    # Scheduled windows use an open lower bound because that version has
+    # already crossed the final commit barrier.
     if run_mode == "backfill":
         lower_bound = backfill_start
         upper_bound = backfill_end
@@ -61,6 +85,9 @@ def extract_incremental(
         lower_operator = ">"
         upper_operator = "<="
 
+    # source_columns supports an explicit source-to-staging rename.  Payments
+    # uses source ``status`` but exposes the staging contract
+    # ``payment_status``; the remaining tables map one-to-one.
     source_columns = source_columns or target_columns
     target_column_list = ", ".join(target_columns)
     source_column_list = ", ".join(source_columns)
@@ -71,6 +98,9 @@ def extract_incremental(
         f"{column} = EXCLUDED.{column}" for column in update_columns
     )
 
+    # The staging upsert and candidate update share one database transaction.
+    # A retry therefore sees either both effects or neither.  Candidate is not
+    # promoted here because dbt, Iceberg and Kafka have not committed yet.
     hook.run(
         f"""
         WITH staged_batch AS (
@@ -132,6 +162,7 @@ def extract_incremental(
 def ecommerce_pipeline():
     @task
     def validate_run_config(**context):
+        """Reject ambiguous/invalid backfill windows before any side effect."""
         params = context["params"]
         if params["run_mode"] != "backfill":
             return
@@ -150,6 +181,7 @@ def ecommerce_pipeline():
 
     @task(retries=2)
     def extract_customers(**context):
+        """Load customer current state into its primary-keyed staging table."""
         params = context["params"]
         return extract_incremental(
             "customers",
@@ -165,6 +197,7 @@ def ecommerce_pipeline():
 
     @task(retries=2)
     def extract_products(**context):
+        """Load the analytical subset of the product catalog."""
         params = context["params"]
         return extract_incremental(
             "products",
@@ -180,6 +213,7 @@ def ecommerce_pipeline():
 
     @task(retries=2)
     def extract_orders(**context):
+        """Load order headers; this window also drives Kafka publication."""
         params = context["params"]
         return extract_incremental(
             "orders",
@@ -195,6 +229,7 @@ def ecommerce_pipeline():
     
     @task(retries=2)
     def extract_order_items(**context):
+        """Load the order-item grain later preserved by both sales facts."""
         params = context["params"]
         return extract_incremental(
             "order_items",
@@ -210,6 +245,7 @@ def ecommerce_pipeline():
     
     @task(retries=2)
     def extract_payments(**context):
+        """Load payment attempts and rename source status at the boundary."""
         params = context["params"]
         return extract_incremental(
             "payments",
@@ -230,6 +266,7 @@ def ecommerce_pipeline():
 
     @task(retries=2)
     def validate_record_count():
+        """Fail fast when a required staging relation is unexpectedly empty."""
         hook = PostgresHook(
             postgres_conn_id=POSTGRES_CONN_ID
         )
@@ -266,6 +303,7 @@ def ecommerce_pipeline():
 
     @task(retries=2)
     def validate_relationships():
+        """Check cross-table referential integrity after the fan-in barrier."""
         hook = PostgresHook(
             postgres_conn_id=POSTGRES_CONN_ID
         )
@@ -331,7 +369,7 @@ def ecommerce_pipeline():
         execution_timeout=timedelta(hours=1)
     )
     def run_dbt_transform():
-        """Build and test the complete dbt project"""
+        """Build snapshots/models/tests as one dbt dependency-aware command."""
         command = [DBT_EXECUTABLE,
                 "build",
                 "--project-dir",
@@ -396,7 +434,12 @@ def ecommerce_pipeline():
 
     @task(retries=2)
     def advance_watermarks(**context):
-        """Commit source windows only after all warehouse loads succeed."""
+        """Commit source windows only after all mandatory sinks succeed.
+
+        Requiring all five candidates prevents a partially extracted batch from
+        moving only some cursors.  Backfill deliberately leaves scheduled
+        progress untouched because its window may be historical.
+        """
         if context["params"]["run_mode"] == "backfill":
             print("Backfill completed; incremental watermarks remain unchanged")
             return
@@ -436,6 +479,9 @@ def ecommerce_pipeline():
             parameters=(list(PIPELINE_NAMES),),
         )
         
+    # Calling decorated functions here creates task nodes; it does not execute
+    # their Python bodies.  The arrows below form a fan-out/fan-in graph:
+    # config -> parallel extract -> validations -> parallel sinks -> commit.
     run_config = validate_run_config()
     customers = extract_customers()
     products = extract_products()
@@ -459,6 +505,8 @@ def ecommerce_pipeline():
         payments,
     ] >> validated_record_count >> validated_relationships
 
+    # These sinks are independent after staging validation.  They may commit in
+    # any order, so every one is replay-safe and the watermark waits for all.
     validated_relationships >> [
         dbt_transform,
         iceberg_batch,

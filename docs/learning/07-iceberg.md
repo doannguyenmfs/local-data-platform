@@ -53,13 +53,48 @@ tự tạo và nhớ cột thư mục `year/month/day`. Iceberg dùng metadata �
 vừa ngăn update cũ ghi đè bản mới. Retry sau một commit thành công có thể không
 có update nào và vẫn kết thúc an toàn.
 
+## Catalog, metadata và data file nằm ở đâu?
+
+Một table name như `local.ecommerce.fact_sales` có ba phần:
+
+- `local`: catalog name Spark cấu hình trong `iceberg_common.py`;
+- `ecommerce`: Iceberg namespace;
+- `fact_sales`: table.
+
+JDBC catalog tables nằm trong PostgreSQL `public` schema và chỉ giữ namespace,
+table registration cùng current metadata location. MinIO bucket `warehouse` giữ
+`metadata.json`, manifest list, manifest và Parquet data/delete files. Spark là
+compute engine đọc catalog rồi truy cập object store; dừng Spark không làm mất
+table.
+
+## First append, incremental merge và no-op
+
+Job tạo table nếu chưa có rồi kiểm tra table rỗng:
+
+1. Bảng rỗng: append toàn bộ initial dataset, tránh row-level MERGE plan vô ích.
+2. Có delta: MERGE theo `order_item_id`, chỉ update khi source version mới hơn.
+3. Không delta: không write, không tạo snapshot rỗng.
+
+No-op quan trọng cho metadata hygiene. Một scheduler chạy hằng ngày nhưng source
+không đổi không nên tạo hàng nghìn snapshots vô nghĩa.
+
+## Copy-on-write và merge-on-read
+
+`fact_sales` batch phù hợp copy-on-write: update ít thường xuyên, reader đơn giản
+và batch có thời gian rewrite file. `current_orders` streaming dùng
+merge-on-read: update ghi delete/data delta nhanh hơn nhưng reader phải merge và
+maintenance phải compact position-delete files.
+
+Không có mode luôn tốt hơn. Quyết định phụ thuộc write frequency, read latency,
+file size và maintenance budget.
+
 ## Chạy
 
 ```bash
 docker compose --profile spark --profile lakehouse up -d --build \
   postgres minio minio-init spark-master spark-worker
 
-docker compose run --rm iceberg-submit
+docker compose --profile '*' run --rm --no-deps iceberg-submit
 ```
 
 MinIO API: <http://localhost:9000>  
@@ -68,7 +103,7 @@ MinIO console: <http://localhost:9001>
 Chạy lại `iceberg-submit` để tạo snapshot merge tiếp theo. Xem lịch sử:
 
 ```bash
-docker compose run --rm \
+docker compose --profile '*' run --rm --no-deps \
   --entrypoint /opt/spark/bin/spark-sql \
   iceberg-submit \
   -f /opt/spark/sql/iceberg_demo.sql
@@ -90,13 +125,17 @@ time travel không thể cứu dữ liệu.
 ## Maintenance
 
 ```bash
-docker compose run --rm iceberg-maintenance
+docker compose --profile '*' run --rm --no-deps iceberg-maintenance
 ```
 
 Job có hai thao tác:
 
 1. `rewrite_data_files`: compact file nhỏ về target khoảng 128 MiB.
 2. `expire_snapshots`: xóa snapshot cũ hơn 7 ngày nhưng luôn giữ ít nhất 10 bản.
+
+Với `current_orders`, job còn gọi `rewrite_position_delete_files`. Bốn table
+được duyệt độc lập; table stream chưa được tạo sẽ được báo `not_created_yet`
+thay vì làm cả maintenance run thất bại.
 
 Không expire snapshot ngay sau mỗi ingest. Maintenance có workload, SLA và
 chính sách retention riêng; tách job giúp retry ingest không vô tình xóa lịch
@@ -114,6 +153,21 @@ sử.
   khả năng rollback. Retention phải gắn với SLA và backup.
 - Small-file problem đến từ micro-batch ghi quá thường xuyên; compaction chữa
   hậu quả, còn batch sizing giải quyết nguyên nhân.
+
+## Vì sao không partition theo mọi cột?
+
+Partition là pruning structure, không phải index miễn phí. Partition theo UUID
+hoặc high-cardinality key tạo quá nhiều partition/file nhỏ. `days(order_date)`
+có cardinality vừa phải và phù hợp query doanh thu theo thời gian. Iceberg hidden
+partitioning còn cho phép evolve transform mà consumer không đổi query column.
+
+## File cần đọc
+
+- `spark/jobs/iceberg_common.py`: catalog/S3/timezone configuration duy nhất.
+- `spark/jobs/iceberg_sales.py`: create, delta filter, append/MERGE, validate.
+- `spark/jobs/maintain_iceberg.py`: file/snapshot retention policy.
+- `spark/jobs/validate_platform.py`: read-only grain check qua catalog.
+- `spark/sql/iceberg_demo.sql`: metadata table và time-travel query.
 
 ## Câu hỏi phỏng vấn
 

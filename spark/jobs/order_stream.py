@@ -1,4 +1,13 @@
-"""Consume versioned order events from Kafka into idempotent Iceberg tables."""
+"""Consume versioned Kafka order events into three idempotent Iceberg views.
+
+One Structured Streaming query produces: immutable logical event history,
+latest order state and a dead-letter table.  Spark checkpointing records source
+progress, while stable-key Iceberg MERGE closes the crash window where a sink
+commit succeeds but checkpoint progress has not yet been persisted.
+
+The module keeps parsing as a separate DataFrame transformation so its schema
+contract can be unit-tested without starting Kafka or MinIO.
+"""
 
 from __future__ import annotations
 
@@ -22,6 +31,9 @@ EVENTS_TABLE = "local.ecommerce.order_events"
 CURRENT_ORDERS_TABLE = "local.ecommerce.current_orders"
 DEAD_LETTER_TABLE = "local.ecommerce.dead_letter_events"
 
+# An explicit schema is safer than inference for a continuous stream: malformed
+# JSON becomes a null parsed struct and is routed to DLQ instead of changing the
+# DataFrame schema from batch to batch.
 EVENT_SCHEMA = StructType(
     [
         StructField("event_id", StringType()),
@@ -48,6 +60,8 @@ EVENT_SCHEMA = StructType(
 
 def parse_kafka_events(kafka_rows: DataFrame) -> DataFrame:
     """Parse the envelope while preserving Kafka coordinates for audit/dedupe."""
+    # Preserve raw payload and Kafka coordinates before parsing.  These fields
+    # are the audit trail and provide a deterministic DLQ identity.
     return (
         kafka_rows.select(
             F.col("key").cast("string").alias("message_key"),
@@ -80,6 +94,8 @@ def parse_kafka_events(kafka_rows: DataFrame) -> DataFrame:
             ),
         )
         .withColumn("ingested_at", F.current_timestamp())
+        # Validation is deliberately conservative.  Unsupported event versions
+        # are retained in DLQ rather than silently interpreted with v1 rules.
         .withColumn(
             "is_valid",
             F.col("event_id").isNotNull()
@@ -92,7 +108,10 @@ def parse_kafka_events(kafka_rows: DataFrame) -> DataFrame:
 
 
 def create_tables(spark) -> None:
+    """Create/evolve the three sink contracts without dropping prior state."""
     spark.sql("CREATE NAMESPACE IF NOT EXISTS local.ecommerce")
+    # Event history is partitioned by occurrence day for time-range scans.  Its
+    # logical immutability is enforced by MERGE `WHEN NOT MATCHED` below.
     spark.sql(
         f"""
         CREATE TABLE IF NOT EXISTS {EVENTS_TABLE} (
@@ -118,6 +137,8 @@ def create_tables(spark) -> None:
         TBLPROPERTIES ('format-version' = '2')
         """
     )
+    # Current state is update-heavy, so merge-on-read avoids rewriting complete
+    # data files for every micro-batch.  Maintenance later compacts delete files.
     spark.sql(
         f"""
         CREATE TABLE IF NOT EXISTS {CURRENT_ORDERS_TABLE} (
@@ -150,6 +171,8 @@ def create_tables(spark) -> None:
         )
         """
     )
+    # DLQ partitioning follows ingestion time because malformed payloads may not
+    # contain a usable business timestamp.
     spark.sql(
         f"""
         CREATE TABLE IF NOT EXISTS {DEAD_LETTER_TABLE} (
@@ -169,13 +192,24 @@ def create_tables(spark) -> None:
 
 
 def merge_batch(batch: DataFrame, batch_id: int) -> None:
-    """Use deterministic keys so replaying a micro-batch is harmless."""
+    """Commit one micro-batch to history/current/DLQ with stable identities.
+
+    ``foreachBatch`` may invoke this function again for a previously committed
+    offset range after a crash.  All writes therefore converge to the same
+    final state instead of relying on exactly-once invocation.
+    """
     if not batch.head(1):
         return
+    # The same parsed rows feed up to three actions/sinks; persist avoids
+    # re-reading Kafka source partitions for each branch.
     batch = batch.persist()
     spark = batch.sparkSession
     try:
+        # In-batch dedupe handles repeated event IDs in the same offset range;
+        # Iceberg MERGE handles duplicates across batches and restarts.
         valid = batch.filter("is_valid").dropDuplicates(["event_id"])
+        # Hashing immutable Kafka coordinates creates a replay-stable DLQ key
+        # even when the payload is not parseable enough to contain an event ID.
         invalid = (
             batch.filter("NOT is_valid")
             .withColumn(
@@ -213,6 +247,8 @@ def merge_batch(batch: DataFrame, batch_id: int) -> None:
                 "kafka_timestamp",
                 "ingested_at",
             )
+            # Initial append avoids an expensive MERGE plan against an empty
+            # table.  All later writes use event_id MERGE for replay safety.
             if spark.table(EVENTS_TABLE).limit(1).count() == 0:
                 event_updates.writeTo(EVENTS_TABLE).append()
             else:
@@ -226,6 +262,8 @@ def merge_batch(batch: DataFrame, batch_id: int) -> None:
                     """
                 )
 
+            # A micro-batch can hold several versions of one order.  Choose the
+            # newest source version, breaking equal timestamps by Kafka offset.
             latest_window = Window.partitionBy("order_id").orderBy(
                 F.col("source_updated_at").desc(),
                 F.col("offset").desc(),
@@ -244,6 +282,8 @@ def merge_batch(batch: DataFrame, batch_id: int) -> None:
                     F.col("ingested_at").alias("updated_at"),
                 )
             )
+            # The MATCHED predicate also rejects a late/older event so replay or
+            # out-of-order arrival cannot roll current state backward.
             if spark.table(CURRENT_ORDERS_TABLE).limit(1).count() == 0:
                 current_updates.writeTo(CURRENT_ORDERS_TABLE).append()
             else:
@@ -271,6 +311,7 @@ def merge_batch(batch: DataFrame, batch_id: int) -> None:
                 "kafka_timestamp",
                 "ingested_at",
             )
+            # Kafka-coordinate MERGE guarantees one DLQ row per poison record.
             if spark.table(DEAD_LETTER_TABLE).limit(1).count() == 0:
                 invalid_updates.writeTo(DEAD_LETTER_TABLE).append()
             else:
@@ -289,6 +330,7 @@ def merge_batch(batch: DataFrame, batch_id: int) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """Switch between continuous service mode and finite backlog processing."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--available-now", action="store_true")
     return parser.parse_args()
@@ -306,6 +348,9 @@ def main() -> None:
     spark.sparkContext.setLogLevel("WARN")
     create_tables(spark)
 
+    # `startingOffsets=earliest` only applies when no checkpoint exists.  Once
+    # created, checkpoint progress is authoritative.  failOnDataLoss surfaces a
+    # retention gap instead of silently skipping offsets.
     kafka_rows = (
         spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", bootstrap_servers)
@@ -315,12 +360,17 @@ def main() -> None:
         .option("maxOffsetsPerTrigger", "10000")
         .load()
     )
+    # foreachBatch provides DataFrame batch semantics and lets all three Iceberg
+    # tables participate in replay-safe MERGE logic.  The three commits are not
+    # one atomic transaction; stable keys make retry converge if one fails.
     writer = (
         parse_kafka_events(kafka_rows)
         .writeStream.foreachBatch(merge_batch)
         .option("checkpointLocation", checkpoint)
         .queryName("order-events-to-iceberg")
     )
+    # availableNow is ideal for tests/backlog drains: process all offsets visible
+    # at start and stop.  Service mode polls every 10 seconds indefinitely.
     query = (
         writer.trigger(availableNow=True).start()
         if args.available_now

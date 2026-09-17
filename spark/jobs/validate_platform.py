@@ -1,4 +1,9 @@
-"""Validate Iceberg row counts and declared grains without mutating data."""
+"""Read-only post-deployment validation for the project-owned Iceberg tables.
+
+This is intentionally an allow-listed gateway job rather than ad-hoc SQL from
+Airflow.  It uses the exact runtime/catalog configuration as writers and fails
+when a persisted table no longer has one row per declared business key.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +24,8 @@ def main() -> None:
     spark.sparkContext.setLogLevel("WARN")
     try:
         metrics: dict[str, dict[str, int]] = {}
+        # Table/key names are repository constants, not request input, so SQL
+        # identifier interpolation cannot be used to execute arbitrary SQL.
         for table_name, key_name in TABLE_KEYS.items():
             row = spark.sql(
                 f"""
@@ -39,6 +46,8 @@ def main() -> None:
                 )
             metrics[table_name] = table_metrics
 
+        # DLQ is allowed to contain multiple rows and has a different operational
+        # meaning; expose its count for triage instead of requiring zero here.
         dead_letters = spark.sql(
             "SELECT COUNT(*) AS row_count "
             "FROM local.ecommerce.dead_letter_events"

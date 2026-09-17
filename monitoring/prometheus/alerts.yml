@@ -1,3 +1,5 @@
+# Every rule has an actionable semantic condition and a `for` debounce window.
+# Thresholds match the local daily SLA; production values must follow real SLOs.
 groups:
   - name: local-data-platform
     rules:
@@ -11,6 +13,7 @@ groups:
           description: "Semantic health checks have failed for more than two minutes."
 
       - alert: PipelineWatermarkStale
+        # 172800 seconds = 48 hours: two missed daily delivery opportunities.
         expr: pipeline_watermark_lag_seconds > 172800
         for: 15m
         labels:
@@ -19,6 +22,8 @@ groups:
           summary: "{{ $labels.pipeline }} watermark is more than 48 hours old"
 
       - alert: PipelineCandidateStuck
+        # Candidate means extract started but the cross-sink commit barrier did
+        # not finish; it is more urgent than ordinary freshness lag.
         expr: pipeline_candidate_pending == 1
         for: 1h
         labels:

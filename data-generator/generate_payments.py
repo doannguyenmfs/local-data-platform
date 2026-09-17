@@ -1,3 +1,5 @@
+"""Generate payment-attempt histories for existing order headers."""
+
 import random
 from datetime import timedelta
 
@@ -18,6 +20,7 @@ PAYMENT_METHODS = [
 
 
 def load_orders(conn):
+    """Return the order fields required to create coherent payment rows."""
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -33,6 +36,7 @@ def load_orders(conn):
 
 
 def generate_payments(conn, orders):
+    """Create mostly successful payments plus retry/failure edge cases."""
     total_orders = len(orders)
     processed_orders = 0
     total_payments = 0
@@ -63,8 +67,9 @@ def generate_payments(conn, orders):
                         processed_orders + i
                     ]
 
-                    # 90%: 1 payment
-                    # 10%: 2-3 payment attempts
+                    # Multiple attempts are intentional: they exercise the
+                    # intermediate payment aggregation and prevent a naive join
+                    # from preserving order-item grain.
                     if random.random() < 0.90:
                         payment_count = 1
                     else:
@@ -136,4 +141,3 @@ def generate_payments(conn, orders):
             f"ORDERS PROCESSED | "
             f"{total_payments:,} PAYMENTS GENERATED"
         )
-

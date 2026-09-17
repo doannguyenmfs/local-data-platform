@@ -1,4 +1,10 @@
-"""Weekly Iceberg maintenance, intentionally separate from ingest SLAs."""
+"""Weekly Iceberg maintenance, intentionally separate from ingest SLAs.
+
+Compaction and snapshot expiration are housekeeping workloads: they consume
+Spark resources but do not produce the daily business batch.  A dedicated DAG
+gives them an independent schedule/retry history and keeps an operational
+maintenance failure off the ingestion critical path.
+"""
 
 from datetime import datetime, timedelta
 import os
@@ -25,6 +31,9 @@ def lakehouse_maintenance():
         execution_timeout=timedelta(hours=2),
     )
     def compact_and_expire_snapshots():
+        """Run the single allow-listed maintenance job and surface driver logs."""
+        # Airflow never receives arbitrary Spark command text.  The gateway
+        # maps this fixed job name to a version-controlled script.
         response = requests.post(
             f"{SPARK_GATEWAY_URL}/jobs/iceberg-maintenance",
             timeout=2 * 60 * 60,

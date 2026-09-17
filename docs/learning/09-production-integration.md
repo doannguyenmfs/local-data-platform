@@ -35,7 +35,8 @@ Spark standalone không hỗ trợ PySpark ở `cluster` deploy mode. Mount Dock
 socket vào Airflow để tạo container sẽ trao quyền root-equivalent và không an
 toàn. Project dùng một gateway allow-list:
 
-- Chỉ chấp nhận `iceberg-sales` và `iceberg-maintenance`.
+- Chỉ chấp nhận `iceberg-sales`, `iceberg-maintenance` và read-only
+  `validate-platform`.
 - Chạy driver ở client mode trong Spark image chuẩn.
 - Executor vẫn được master phân bổ sang worker.
 - Một lock ngăn hai job maintenance/batch tranh tài nguyên local cùng lúc.
@@ -44,6 +45,15 @@ toàn. Project dùng một gateway allow-list:
 Đây là adapter phù hợp local environment. Ở cluster thật, thay bằng Apache Livy,
 Spark Operator hoặc managed job API; DAG dependency không cần đổi về mặt ý
 nghĩa.
+
+Gateway nhận job name trong URL, không nhận shell command/path từ request. Đây
+là khác biệt security quan trọng: Airflow có thể yêu cầu một capability đã định
+nghĩa nhưng không thể biến gateway thành remote-code-execution endpoint. Một
+process lock serializes finite jobs vì local Spark worker chỉ có 2 cores/3 GiB.
+
+HTTP status thể hiện lỗi gateway/protocol; JSON `return_code` thể hiện Spark job
+exit status. Airflow log cả `log_tail` để lỗi executor/driver không bị che bởi
+một thông báo HTTP chung chung.
 
 ## Watermark là commit boundary
 
@@ -68,6 +78,19 @@ platform dùng at-least-once delivery kết hợp idempotent consumers/sinks.
 Kafka publication thành công là đủ để batch DAG tiếp tục; không cần đợi streaming
 consumer ghi Iceberg. Kafka là durable hand-off boundary, consumer có thể catch
 up sau khi restart.
+
+## Ownership của retry
+
+| Boundary | Ai retry? | State dùng để tiếp tục |
+| --- | --- | --- |
+| Airflow task | Airflow | task instance + idempotent sink |
+| Spark finite job | Airflow gọi lại gateway | Iceberg snapshot/high-water |
+| Kafka producer request | producer library + Airflow | broker ack + deterministic ID |
+| Continuous stream | Docker restart policy/Spark | Kafka log + checkpoint |
+| Iceberg maintenance | maintenance DAG | Iceberg procedures trên current state |
+
+Không để hai scheduler cùng retry vô hạn một failure mà không có ownership rõ;
+điều đó tạo retry storm.
 
 ## Khởi động full platform
 
@@ -118,6 +141,28 @@ vẫn idempotent; producer có thể republish nhưng event ID giữ nguyên. V�
 rất lớn, nên tạm dừng stream hoặc điều chỉnh `maxOffsetsPerTrigger` để tránh làm
 ảnh hưởng realtime SLA.
 
+## Vì sao downstream chạy song song?
+
+dbt warehouse, Iceberg batch và Kafka publication đều đọc staging đã được
+validate và không phụ thuộc output của nhau. Chạy song song giảm critical path.
+Đổi lại, khi một nhánh fail, hai nhánh khác có thể đã commit; vì vậy từng sink
+bắt buộc idempotent và watermark barrier phải nằm sau cả ba.
+
+Nếu cố rollback cross-system sẽ cần distributed transaction giữa PostgreSQL,
+object storage và Kafka—không thực tế cho kiến trúc này. Retry-forward với stable
+identity đơn giản và vận hành tốt hơn.
+
+## Configuration boundary
+
+Airflow task chạy trong container nên dùng `postgres:5432`, `kafka:19092`,
+`spark-gateway:8090`. dbt CLI từ host dùng `localhost:<published-port>`. Project
+giữ hai biến port có ý nghĩa rõ thay vì để một giá trị “hoạt động tình cờ” ở một
+execution context.
+
+Producer được chạy bằng `/opt/dbt-venv/bin/python` vì dependency Kafka/psycopg
+được cài trong venv đó. Airflow task-runner Python là runtime framework và không
+được giả định có mọi project dependency.
+
 ## Security gap được chấp nhận cho local
 
 - Kafka PLAINTEXT, MinIO development credentials, PostgreSQL password trong
@@ -137,3 +182,11 @@ backup/restore test và resource autoscaling.
 - `order-stream` tự phục hồi từ checkpoint sau restart.
 - Weekly maintenance DAG độc lập với ingest DAG.
 - Runbook mô tả được recovery mà không cần đọc source code.
+
+## File cần đọc
+
+- `airflow/dags/ecommerce_pipeline.py`: orchestration và final barrier.
+- `spark/gateway/job_gateway.py`: allow-list, subprocess và serialized submit.
+- `airflow/dags/lakehouse_maintenance.py`: housekeeping control flow riêng.
+- `docker-compose.yml`: dependency/health/profile/runtime wiring.
+- `docs/runbook.md`: operator action cho từng failure.

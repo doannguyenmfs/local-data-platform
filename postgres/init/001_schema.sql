@@ -1,3 +1,6 @@
+-- OLTP-shaped source schema. Constraints stay enabled during generation so bad
+-- source relationships/status/measure values fail at the earliest boundary.
+
 -- 1. EXTENSION
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -107,6 +110,8 @@ CREATE TABLE IF NOT EXISTS payments(
 );
 
 -- 7. INDEX
+-- These indexes serve common source lookups. At larger volume, an updated_at
+-- index would also be required for Airflow watermark-range extraction.
 CREATE INDEX idx_orders_customer_id
     ON orders(customer_id);
 CREATE INDEX idx_orders_order_date

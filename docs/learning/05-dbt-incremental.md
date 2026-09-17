@@ -6,6 +6,28 @@
 chỉ xử lý các record được Airflow nạp mới hoặc cập nhật vào staging, nhưng vẫn
 giữ được tính idempotent khi chạy lại.
 
+dbt ở đây không thay Airflow extract. Airflow chịu trách nhiệm đưa source vào
+staging và giữ cross-system watermark; dbt chịu trách nhiệm dependency SQL,
+materialization, test, documentation và lineage từ staging tới mart. Ranh giới
+này giúp mỗi tool làm đúng sở trường.
+
+## Vì sao có ba layer model?
+
+| Layer | Trách nhiệm | Materialization trong project |
+| --- | --- | --- |
+| `stg_` | chuẩn hóa tên/type, giữ gần source | view |
+| `int_` | join/aggregate reusable theo business grain | view |
+| marts | contract cho consumer | view hoặc incremental table |
+
+Staging view không tồn tại chỉ để đổi tên cho đẹp. Nó là dbt node đầu tiên nối
+physical source bằng `source()` với lineage/test/docs. Tuy nhiên, staging không
+phải “lớp chống mọi breaking change” một cách thần kỳ: nếu source đổi cột thì
+staging SQL vẫn phải sửa. Giá trị thật là downstream chỉ phụ thuộc contract
+`stg_*`, nên migration được tập trung tại một biên thay vì sửa mọi consumer.
+
+Intermediate tránh lặp logic payment aggregation và order-item enrichment giữa
+nhiều mart. Nó không phải public BI contract, vì vậy có thể refactor dễ hơn.
+
 ## Ba loại thời gian không được trộn lẫn
 
 | Cột | Ý nghĩa | Dùng cho |
@@ -45,6 +67,11 @@ daily_sales.max_source_loaded_at
   mark hiện có.
 - `merge` insert business key mới và update business key đã tồn tại.
 
+Trước MERGE, model resolve `customer_sk` bằng temporal join với SCD2. Nó giữ cả
+`customer_id` để trace về source. Index trên `order_date`, `customer_sk`,
+`product_id`, `source_loaded_at` phục vụ filter/join phổ biến; index không được
+thêm tùy tiện vì mỗi index làm write/merge tốn thêm chi phí.
+
 `previous_order_date` lưu ngày cũ khi một order item bị chuyển từ ngày A sang
 ngày B. Đây không phải measure nghiệp vụ; nó là metadata sửa aggregate. Nếu chỉ
 tính lại ngày B, số liệu còn lại của ngày A sẽ bị stale.
@@ -63,6 +90,22 @@ không ghi lại mọi ngày.
 Post-hook xóa aggregate không còn fact tương ứng. Nó cần thiết khi record duy
 nhất của ngày A được chuyển sang ngày B: phép `merge` có thể tạo ngày B nhưng
 không thể tự suy ra rằng row ngày A phải bị xóa.
+
+`daily_sales` không chỉ lấy các fact mới rồi cộng dồn. Cộng dồn sẽ sai khi một
+fact cũ bị update quantity/payment hoặc chuyển ngày. Model xác định ngày bị ảnh
+hưởng rồi tính lại toàn bộ ngày đó từ fact canonical; đây là recompute nhỏ có
+tính quyết định, dễ reasoning hơn delta arithmetic.
+
+## Jinja compile-time và SQL run-time
+
+`is_incremental()` và vòng lặp `adapter.get_columns_in_relation(this)` chạy khi
+dbt render model. SQL kết quả mới chạy ở PostgreSQL. Project kiểm tra target có
+cột high-water hay chưa để nâng cấp relation cũ an toàn: lần migration đầu đọc
+đủ dữ liệu, dbt đồng bộ cột; các lần sau mới bật filter incremental.
+
+`ref()` không chỉ thay tên bảng. Nó tạo dependency trong DAG dbt, tự chọn đúng
+schema target và cho phép dbt build upstream trước downstream. `source()` đánh
+dấu relation do hệ thống ngoài dbt sở hữu.
 
 ## Vì sao CI chạy `dbt build` hai lần?
 
@@ -97,12 +140,33 @@ dbt/.venv/bin/dbt build \
 
 - Incremental filter dùng toán tử `>` vì một dbt model build là transaction:
   hoặc cả batch merge thành công, hoặc rollback.
-- `on_schema_change='fail'` cố tình làm pipeline dừng khi schema drift. Thay đổi
-  schema phải được review và migrate rõ ràng.
+- `on_schema_change='sync_all_columns'` cho phép hai mart nhận cột mới trong lần
+  nâng cấp đã biết. Nó không thay data contract review: rename/drop/type change
+  vẫn phải test và rollout có chủ đích. Nếu tổ chức muốn drift luôn dừng, đổi
+  policy về `fail` sau khi migration hoàn tất.
 - Incremental không tự giải quyết hard delete ở source. Project hiện coi source
   delete và late data cũ hơn Airflow watermark là accepted risk; backfill được
   dùng khi phát hiện.
 - `--full-refresh` là thao tác có chủ đích, không dùng trong DAG hằng ngày.
+
+## Vì sao thiết kế này thay vì các lựa chọn khác?
+
+| Lựa chọn | Không dùng làm mặc định vì sao? |
+| --- | --- |
+| Rebuild table mỗi ngày | đơn giản nhưng write/read toàn bộ và mất lợi ích incremental |
+| Increment theo `order_date` | bỏ sót update cho order lịch sử |
+| Cộng delta trực tiếp vào daily mart | khó đảo update/chuyển ngày và dễ double count khi retry |
+| Dùng hash mọi cột cho fact | vẫn cần xác định candidate rows; `source_loaded_at` đã là ingestion boundary |
+| Dùng dbt để extract source | dbt không sở hữu cross-system commit barrier/Kafka handoff |
+
+## Bản đồ file của level
+
+- `dbt/models/staging/`: source contract và generic tests.
+- `dbt/models/intermediate/`: payment/order-item logic dùng lại.
+- `dbt/models/marts/fact_sales.sql`: incremental row-grain model.
+- `dbt/models/marts/daily_sales.sql`: affected-partition recompute.
+- `dbt/tests/`: reconciliation/invariant không diễn đạt đủ bằng generic test.
+- `.github/workflows/dbt-ci.yml`: initial build, no-op replay và mutation test.
 
 ## Câu hỏi phỏng vấn
 

@@ -1,3 +1,8 @@
+{#
+  Thin source-conformed view: keep one customer row per staging business key.
+  `source()` records that Airflow/PostgreSQL, not dbt, owns the physical table.
+  Business joins/history deliberately happen in later layers.
+#}
 {{ config(materialized='view') }}
 
 select

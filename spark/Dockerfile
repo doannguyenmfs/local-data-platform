@@ -1,3 +1,5 @@
+# Resolve immutable binary dependencies in throwaway stages; the runtime image
+# receives only jars, not curl/Maven caches or build tools.
 FROM alpine:3.22 AS dependencies
 
 ARG POSTGRES_JDBC_VERSION=42.7.12
@@ -25,6 +27,8 @@ FROM apache/spark:3.5.9-scala2.12-java17-python3-r-ubuntu
 
 USER root
 
+# Every Spark role (master, worker, gateway, batch and stream driver) uses this
+# same image, eliminating dependency drift between submitter and executor.
 COPY --from=dependencies /postgresql.jar /opt/spark/jars/postgresql.jar
 COPY --from=dependencies /iceberg-spark-runtime.jar /opt/spark/jars/iceberg-spark-runtime.jar
 COPY --from=dependencies /iceberg-aws-bundle.jar /opt/spark/jars/iceberg-aws-bundle.jar
@@ -34,6 +38,8 @@ COPY --chown=185:0 spark/tests /opt/spark/tests
 COPY --chown=185:0 spark/sql /opt/spark/sql
 COPY --chown=185:0 spark/gateway /opt/spark/gateway
 
+# UID 185 is the non-root user provided by the official Spark image.  The shared
+# volume needs group-compatible ownership for Parquet output and checkpoints.
 RUN mkdir -p /opt/lakehouse/parquet /opt/lakehouse/checkpoints \
     && chown -R 185:0 /opt/lakehouse
 

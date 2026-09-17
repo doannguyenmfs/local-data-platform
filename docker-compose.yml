@@ -1,3 +1,9 @@
+# Local physical topology. The default profile starts core PostgreSQL/Airflow;
+# optional profiles add Spark, lakehouse, streaming and monitoring. `tools`
+# services are finite jobs created by `docker compose run`, not daemons.
+
+# One anchor keeps all five Airflow daemons on the same image, connection
+# contract and bind mounts. Per-service sections below change only their role.
 x-airflow-common: &airflow-common
     build:
       context: .
@@ -79,6 +85,8 @@ x-airflow-common: &airflow-common
       redis:
         condition: service_healthy
 
+# Master, worker, gateway and job drivers share one Spark image and one catalog/
+# object-store contract. This avoids driver/executor jar and config drift.
 x-spark-common: &spark-common
     build:
       context: .
@@ -410,6 +418,8 @@ services:
       KAFKA_NODE_ID: 1
       CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
       KAFKA_PROCESS_ROLES: broker,controller
+      # One combined KRaft broker/controller is resource-efficient for local
+      # learning. RF=1 below is not an HA production topology.
       KAFKA_LISTENERS: CONTROLLER://:9093,PLAINTEXT://:19092,PLAINTEXT_HOST://:9092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092,PLAINTEXT_HOST://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
@@ -493,6 +503,8 @@ services:
       - spark.cores.max=1
       - --conf
       - spark.executor.memory=1g
+      # Keep the always-on query within half of the 2-core local worker so a
+      # finite gateway job can still acquire executor resources.
       - /opt/spark/jobs/order_stream.py
     depends_on:
       kafka-init:
@@ -608,6 +620,8 @@ services:
   # AIRFLOW CONFUGURATION
   # =============
 volumes:
+  # Named volumes survive container recreation. They are local durability, not
+  # off-host backup; `docker compose down -v` removes all of them.
   ecommerce-postgres-data:
   airflow-postgres-data:
   redis-data:

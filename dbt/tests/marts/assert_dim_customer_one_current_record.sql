@@ -1,3 +1,4 @@
+-- SCD2 invariant: every business customer has exactly one open version.
 select
     customer_id,
     count(*) filter (

@@ -1,3 +1,5 @@
+# Project metadata controls discovery, not database credentials. Connection
+# targets live in profiles.yml so the same model DAG can run in dev/ci/prod.
 name: local_data_platform
 version: 1.0.0
 config-version: 2
@@ -7,4 +9,5 @@ profile: local_data_platform
 model-paths: ["models"]
 docs-paths: ["docs"]
 
+# Generated artifacts are safe to remove and must not be treated as source.
 clean-targets: ["target", "logs", "dbt_packages"]

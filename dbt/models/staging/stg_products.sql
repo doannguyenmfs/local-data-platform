@@ -1,3 +1,8 @@
+{#
+  Expose only product attributes approved for analytics. Operational stock and
+  active flags remain outside this contract until a downstream requirement
+  needs them; selecting every source column would create accidental coupling.
+#}
 {{ config(materialized='view') }}
 
 select

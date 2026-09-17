@@ -1,4 +1,11 @@
-"""Publish deterministic order events from staging for replayable local demos."""
+"""Publish deterministic order events from staging.
+
+The producer is a finite batch hand-off, not the long-running stream.  It reads
+exactly the Airflow candidate window (or an explicit backfill window), builds a
+versioned event envelope and waits for broker delivery acknowledgements before
+returning success.  Stable UUID5 identities make a later Airflow retry safe
+across producer processes, which library-level idempotence alone cannot do.
+"""
 
 from __future__ import annotations
 
@@ -14,10 +21,14 @@ import psycopg
 from confluent_kafka import Producer
 
 
+# UUID5(namespace, name) is deterministic.  Do not change this namespace after
+# events have been published: doing so would assign a second identity to the
+# same source version and defeat downstream replay deduplication.
 EVENT_NAMESPACE = uuid.UUID("c9769ea0-bba4-4ab6-9e12-73d9199cf5c7")
 
 
 def json_default(value: Any) -> str:
+    """Serialize database-native scalar types without losing precision."""
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, Decimal):
@@ -28,6 +39,7 @@ def json_default(value: Any) -> str:
 
 
 def parse_args() -> argparse.Namespace:
+    """Accept an optional row cap and an all-or-nothing backfill interval."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--start")
@@ -36,6 +48,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def required(name: str) -> str:
+    """Read mandatory runtime configuration without printing secret values."""
     value = os.getenv(name)
     if not value:
         raise ValueError(f"Missing required environment variable: {name}")
@@ -66,6 +79,7 @@ def main() -> None:
     delivery_errors: list[str] = []
 
     def delivery_callback(error, message) -> None:
+        """Run asynchronously when Kafka accepts or rejects a record."""
         nonlocal delivered
         if error:
             delivery_errors.append(str(error))
@@ -73,6 +87,8 @@ def main() -> None:
         delivered += 1
 
     with connection, connection.cursor() as cursor:
+        # Explicit backfills use [start, end).  Scheduled runs use the same
+        # (committed, candidate] bounds that Airflow extracted into staging.
         if (args.start is None) != (args.end is None):
             raise ValueError("--start and --end must be supplied together")
         if args.start is not None:
@@ -113,10 +129,15 @@ def main() -> None:
             query += " LIMIT %s"
             parameters = (*parameters, args.limit)
 
+        # A server-side cursor is not required for the current data volume;
+        # psycopg still yields rows one at a time below, avoiding a second large
+        # Python list.  ORDER BY is for deterministic observability, not global
+        # Kafka ordering (which exists only within a partition).
         cursor.execute(query, parameters)
         columns = [column.name for column in cursor.description]
         for values in cursor:
             row = dict(zip(columns, values))
+            # One business order version maps to one event identity forever.
             event_id = uuid.uuid5(
                 EVENT_NAMESPACE,
                 f"{row['order_id']}:{row['updated_at'].isoformat()}",
@@ -136,6 +157,9 @@ def main() -> None:
                     "source_updated_at": row["updated_at"],
                 },
             }
+            # produce() is asynchronous and may fill its local buffer.  Polling
+            # lets delivery callbacks run and applies backpressure rather than
+            # dropping a record when BufferError is raised.
             while True:
                 try:
                     producer.produce(
@@ -153,6 +177,8 @@ def main() -> None:
                     producer.poll(1)
             producer.poll(0)
 
+    # Enqueueing is not a successful hand-off.  Flush and callback checks make
+    # task success mean that every event received a broker acknowledgement.
     remaining = producer.flush(30)
     if remaining:
         raise RuntimeError(f"{remaining} Kafka messages were not delivered")

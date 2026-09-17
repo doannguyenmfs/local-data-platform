@@ -1,7 +1,11 @@
+"""Entry point that generates source tables in foreign-key-safe order.
+
+This utility seeds OLTP-shaped data only.  Airflow/dbt/Spark later move and
+transform it; the generator does not write staging or analytical schemas.
+"""
+
 import psycopg
-from faker import Faker
 from config import DB_CONFIG
-import random
 from pathlib import Path
 
 from generate_customers import generate_customers
@@ -12,6 +16,7 @@ from generate_payments import load_orders, generate_payments
 
 
 def execute_sql_file(conn, filename: str) -> None:
+    """Apply a trusted repository SQL correction inside the same connection."""
     sql_path = Path(__file__).parent.parent / "postgres" / "sql" / filename
     with conn.cursor() as cur:
         cur.execute(sql_path.read_text())
@@ -19,6 +24,7 @@ def execute_sql_file(conn, filename: str) -> None:
 
 
 def main():
+    """Generate parents before children so database constraints stay active."""
     with psycopg.connect(**DB_CONFIG) as conn:
         # product
         generate_products(conn)
@@ -48,7 +54,8 @@ def main():
         )
         generate_payments(conn, orders)
 
-        # data correction
+        # Corrections create deterministic edge cases used by validation/model
+        # lessons after the random bulk generation has completed.
         execute_sql_file(conn, "001_correction.sql")
 
 if __name__=="__main__":

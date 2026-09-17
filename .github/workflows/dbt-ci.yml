@@ -1,3 +1,5 @@
+# Validate both creation and the stateful incremental path. The mutation phase
+# catches stale aggregates that a one-shot `dbt build` would never exercise.
 name: dbt CI
 
 on:

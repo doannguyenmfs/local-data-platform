@@ -27,6 +27,15 @@ Exporter giữ process sống khi dependency lỗi và xuất `component_up=0`; 
 crash theo dependency, Prometheus chỉ biết scrape target mất mà không còn context
 subsystem nào hỏng.
 
+Exporter là adapter project-specific vì generic container metrics không biết
+watermark/candidate hay required Kafka topic. Nó thu thập theo chu kỳ 15 giây ở
+background thread; HTTP `/metrics` chỉ expose giá trị đã collect, tránh mỗi
+Prometheus scrape đồng thời tạo query/network storm tới mọi dependency.
+
+Mỗi collector tự bắt exception và đặt metric subsystem tương ứng về 0. Một Kafka
+timeout không được làm mất PostgreSQL freshness metrics, và process không được
+crash chỉ vì dependency nó đang quan sát bị down.
+
 ## Metrics
 
 | Metric | Ý nghĩa |
@@ -42,6 +51,14 @@ High-cardinality label như `order_id`, `customer_id`, `event_id` tuyệt đối
 đưa vào metric. Chúng làm số time series tăng không giới hạn; dùng log/table để
 điều tra từng record.
 
+`pipeline_watermark_lag_seconds` dùng committed watermark, không dùng candidate.
+Candidate chỉ là batch chưa hoàn tất; dùng nó làm freshness sẽ báo dữ liệu mới
+trước khi consumers thực sự có thể tin batch đã commit.
+
+`staging_table_rows` là smoke signal, không phải expected count assertion. Row
+count tăng/giảm theo business; chỉ trạng thái rỗng kéo dài được cảnh báo trong
+lab. Data correctness chi tiết thuộc dbt/Spark test.
+
 ## Alerts
 
 - Component down quá 2 phút: critical.
@@ -52,6 +69,19 @@ High-cardinality label như `order_id`, `customer_id`, `event_id` tuyệt đối
 
 `for` duration chống alert flapping do restart ngắn. Threshold phải dựa trên SLA;
 48 giờ phù hợp DAG daily demo nhưng không phù hợp pipeline realtime.
+
+Alert lifecycle:
+
+```text
+Prometheus expression true
+    -> pending trong khoảng `for`
+    -> firing
+    -> Alertmanager group/deduplicate/route
+    -> receiver hoặc UI
+```
+
+Nếu expression trở lại false trước `for`, alert không firing. Đây là debounce,
+không phải retry của pipeline.
 
 Alertmanager local chỉ group và hiển thị alert trên UI, không gửi ra bên ngoài vì
 repository không chứa Slack/email credential. Production thêm receiver bằng
@@ -78,6 +108,10 @@ docker compose \
 Grafana tự provision Prometheus datasource và dashboard **Local Data Platform
 Overview**. Credentials lấy từ `.env`.
 
+Provisioning từ Git tránh dashboard chỉ tồn tại trong Grafana volume và không ai
+biết ai đã click sửa gì. Grafana volume vẫn giữ local state/user, nhưng datasource
+và dashboard contract có thể tái tạo từ repository.
+
 ## Lưu ý production
 
 - Monitoring phải ở failure domain khác platform; local Compose chỉ minh họa.
@@ -87,6 +121,21 @@ Overview**. Credentials lấy từ `.env`.
   metrics phải đi cùng nhau.
 - Theo dõi alert noise. Alert không dẫn tới hành động nên bị xóa hoặc đổi thành
   dashboard signal.
+
+## Vì sao monitoring stack cũng chỉ một node?
+
+Mục tiêu local là học metric/rule/dashboard wiring. Prometheus, Alertmanager và
+Grafana cùng Docker host nên nếu host chết, monitoring cũng biến mất—một failure
+domain không chấp nhận được ở production. Triển khai thật cần replica/remote
+write và monitoring nằm ngoài workload được quan sát.
+
+## File cần đọc
+
+- `monitoring/platform_exporter.py`: collector và metric semantics.
+- `monitoring/prometheus/prometheus.yml`: scrape/rule/Alertmanager wiring.
+- `monitoring/prometheus/alerts.yml`: expression, threshold, duration, severity.
+- `monitoring/alertmanager/alertmanager.yml`: grouping/routing local.
+- `monitoring/grafana/provisioning/`: declarative datasource/dashboard loading.
 
 ## Điều kiện hoàn thành
 

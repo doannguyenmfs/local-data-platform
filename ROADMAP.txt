@@ -17,6 +17,10 @@ Xác minh end-to-end gần nhất: 2026-09-17
 | 10 | Observability | semantic metrics, Prometheus, alerts, Grafana |
 | 11 | Delivery | container validation, GitHub Actions, runbook |
 
+Tài liệu học tương ứng nằm trong `docs/learning/01-*.md` đến `11-*.md`.
+Topology logical/physical nằm tại `docs/architecture.md`; trách nhiệm từng file
+nằm tại `docs/code-map.md`; thao tác vận hành nằm tại `docs/runbook.md`.
+
 ## Luồng hoàn chỉnh
 
 ```text

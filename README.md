@@ -25,6 +25,11 @@ Exporter ──► Prometheus ──► Grafana
                     └─────► Alertmanager
 ```
 
+Topology chi tiết gồm 26 service definitions, 18 container chạy dài hạn, 3 init
+job, 5 one-shot tools, network/port/volume và lý do chọn số node được mô tả tại
+[Kiến trúc hệ thống](docs/architecture.md). Tra cứu trách nhiệm từng file tại
+[Bản đồ code](docs/code-map.md).
+
 Watermark chỉ được commit sau khi dbt, Iceberg và Kafka publication đều thành
 công. Vì không có distributed transaction xuyên ba hệ thống, mọi sink dùng
 at-least-once delivery kết hợp khóa ổn định, merge/upsert và checkpoint để retry
@@ -146,15 +151,21 @@ thành production deployment. Luôn truyền `--target` rõ ràng trong automati
 
 Đọc theo thứ tự:
 
-1. [dbt incremental](docs/learning/05-dbt-incremental.md)
-2. [Spark batch](docs/learning/06-spark.md)
-3. [Iceberg lakehouse](docs/learning/07-iceberg.md)
-4. [Kafka streaming](docs/learning/08-kafka.md)
-5. [Production integration](docs/learning/09-production-integration.md)
-6. [Monitoring và alerting](docs/learning/10-observability.md)
-7. [System verification và production trade-offs](docs/learning/11-verification-and-tradeoffs.md)
-8. [Runbook vận hành](docs/runbook.md)
-9. [Roadmap và phạm vi](ROADMAP.txt)
+1. [Nền tảng data platform local](docs/learning/01-platform-foundations.md)
+2. [Airflow orchestration](docs/learning/02-airflow-orchestration.md)
+3. [Data warehouse và SCD2](docs/learning/03-warehouse-modeling.md)
+4. [Incremental, idempotency và backfill](docs/learning/04-incremental-backfill.md)
+5. [dbt incremental](docs/learning/05-dbt-incremental.md)
+6. [Spark batch](docs/learning/06-spark.md)
+7. [Iceberg lakehouse](docs/learning/07-iceberg.md)
+8. [Kafka streaming](docs/learning/08-kafka.md)
+9. [Production integration](docs/learning/09-production-integration.md)
+10. [Monitoring và alerting](docs/learning/10-observability.md)
+11. [System verification và production trade-offs](docs/learning/11-verification-and-tradeoffs.md)
+12. [Kiến trúc logical và physical](docs/architecture.md)
+13. [Bản đồ code theo file](docs/code-map.md)
+14. [Runbook vận hành](docs/runbook.md)
+15. [Roadmap và phạm vi](ROADMAP.txt)
 
 ## Phạm vi production-shaped
 

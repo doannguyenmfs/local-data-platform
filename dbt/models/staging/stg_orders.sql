@@ -1,3 +1,7 @@
+{#
+  Order-header staging contract. The view does not aggregate or join because a
+  staging model should preserve source grain and make upstream drift visible.
+#}
 {{ config(materialized='view') }}
 
 select

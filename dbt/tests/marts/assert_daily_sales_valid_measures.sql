@@ -1,3 +1,5 @@
+-- Business invariant guard: paid sales is a subset of total sales and no
+-- additive daily measure can be negative in this source domain.
 select
     sales_date,
     total_orders,

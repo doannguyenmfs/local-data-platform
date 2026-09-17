@@ -51,6 +51,28 @@ vì business key là UUID; tự đặt `numPartitions` khi không có partition 
 phù hợp dễ tạo nhiều full-table scan. Khi dữ liệu lớn, nên bổ sung numeric
 surrogate/range column hoặc các predicates không giao nhau.
 
+## Driver, executor, stage và shuffle trong chính job này
+
+Driver chạy `main()`, tạo logical/physical plan và gọi action. Join/aggregate có
+thể tạo shuffle: cùng `order_id` phải được đưa về cùng partition để aggregate
+payment. Executor trên worker chạy task cho từng partition. `persist()` sales
+dataset vì validation và write là hai action; không cache thì Spark có thể đọc
+JDBC và tính lại lineage hai lần.
+
+`persist()` không miễn phí: nó dùng memory/disk và phải được cân nhắc với dataset
+size. Job kết thúc process ngay sau write nên Spark giải phóng cache khi stop;
+long-running application cần `unpersist()` rõ ràng.
+
+## Vì sao transformation là pure function riêng?
+
+`transform_sales(orders, order_items, payments)` không tự mở JDBC và không tự
+write. Nhờ đó unit test tạo DataFrame nhỏ và kiểm tra business logic trong local
+Spark mà không cần PostgreSQL/MinIO. I/O nằm ở rìa, transformation nằm giữa—đây
+là cấu trúc testable hơn một `main()` dài.
+
+`validate_sales()` trả metric và raise trước write. Output không bao giờ được coi
+là thành công nếu grain/null/measure invariant đã sai.
+
 ## Chạy
 
 ```bash
@@ -79,6 +101,10 @@ snapshot history hay concurrent commit an toàn. Nếu job chết giữa lúc th
 file, reader có thể thấy trạng thái không hoàn chỉnh. Đây chính là vấn đề Level
 7 giải quyết bằng Iceberg.
 
+`mode('overwrite')` ở level này là cố ý: nó tạo baseline dễ hiểu và làm nổi bật
+vấn đề transaction/concurrent reader. Đây không phải sink được daily DAG dùng
+để commit production-shaped data; Iceberg job mới là sink tích hợp chính.
+
 ## Lưu ý và mẹo
 
 - Partition theo cột thường xuyên được filter và có cardinality vừa phải.
@@ -88,6 +114,23 @@ file, reader có thể thấy trạng thái không hoàn chỉnh. Đây chính l
 - Spark transformations là lazy; validation action mới thực sự kích hoạt job.
 - Không log password JDBC. Hàm config chỉ báo tên biến bị thiếu.
 - Image chứa JDBC driver cố định thay vì tải package mỗi lần chạy.
+
+## Vì sao Dockerfile có nhiều build stage?
+
+- Stage Alpine tải JDBC và Iceberg jars theo version cố định.
+- Stage Maven resolve toàn bộ transitive jars của Spark Kafka connector.
+- Runtime stage chỉ nhận artifacts cần thiết trên Spark image chuẩn.
+
+Tải jar trong mỗi `spark-submit --packages` làm startup phụ thuộc internet và có
+thể resolve version khác nhau. Build-time resolution tạo image reproducible,
+đổi lại image lớn hơn và phải rebuild khi upgrade dependency.
+
+## Resource decision
+
+Local cluster chỉ có một worker 2 cores/3 GiB. Gateway jobs bị giới hạn 1 core và
+2 GiB; stream dùng 1 core/1 GiB. Mục tiêu là tránh một application chiếm hết
+worker, không phải tuning tối ưu throughput. Production sizing phải dựa trên
+shuffle size, spill, GC, input partitions và SLA.
 
 ## Câu hỏi phỏng vấn
 

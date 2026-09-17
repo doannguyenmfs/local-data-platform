@@ -1,6 +1,9 @@
 # Runbook vận hành Local Data Platform
 
 Tài liệu này ưu tiên hành động. Phần “tại sao” nằm trong `docs/learning`.
+Topology, node/container, port và volume được giải thích trong
+[`docs/architecture.md`](architecture.md); trách nhiệm từng file nằm trong
+[`docs/code-map.md`](code-map.md).
 
 ## 1. Chuẩn bị và khởi động
 

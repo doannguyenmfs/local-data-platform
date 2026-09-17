@@ -1,3 +1,5 @@
+-- Half-open SCD2 intervals must move forward; equal/reversed bounds make an
+-- impossible version that cannot be resolved by a temporal join.
 select
     customer_sk,
     customer_id,

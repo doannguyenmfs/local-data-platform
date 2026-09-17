@@ -1,9 +1,12 @@
+"""Generate one-to-many order items while respecting order/product keys."""
+
 import random
 
 BATCH_SIZE = 10_000
 
 
 def load_ids(conn):
+    """Load valid parent keys once for random relationship generation."""
     with conn.cursor() as cur:
         cur.execute("SELECT order_id FROM orders;")
         order_ids = [row[0] for row in cur.fetchall()]
@@ -15,6 +18,7 @@ def load_ids(conn):
 
 
 def generate_order_items(conn, order_ids, product_ids):
+    """Generate 1–5 distinct products per order using PostgreSQL COPY."""
     total_orders = len(order_ids)
     processed_orders = 0
     total_items = 0
@@ -45,6 +49,8 @@ def generate_order_items(conn, order_ids, product_ids):
 
                     item_count = random.randint(1, 5)
 
+                    # sample() avoids duplicate (order_id, product_id) pairs and
+                    # therefore respects the source unique constraint.
                     selected_products = random.sample(
                         product_ids,
                         item_count,
