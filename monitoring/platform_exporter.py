@@ -8,6 +8,11 @@ and collection-error gauges while the HTTP metrics endpoint stays available.
 Beginner map: collectors READ system state; Gauges translate it into numbers;
 Prometheus SCRAPES those numbers and evaluates alert rules.  This process never
 repairs a pipeline or sends notifications itself.
+
+That last boundary is deliberate: P0 detects and displays failures locally,
+while external paging, SLO/error-budget policy, centralized logs and traces are
+post-P0 backlog. Keeping observation read-only prevents a transient monitoring
+bug from mutating data or advancing progress state.
 """
 
 from __future__ import annotations

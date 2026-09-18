@@ -1,4 +1,9 @@
-# Kiến trúc Local Data Platform
+# Kiến trúc Local Data Platform — baseline P0
+
+Tài liệu này mô tả kiến trúc **đang có trong code**, không mô tả kiến trúc P1
+dự kiến. Xem bản tóm tắt capability và bằng chứng tại
+[`current-state.md`](current-state.md); xem các thành phần chưa triển khai tại
+[`backlog.md`](backlog.md).
 
 ## 1. Phạm vi và nguyên tắc
 
@@ -9,6 +14,11 @@ monitoring quan sát semantic health thay vì chỉ nhìn process.
 
 Mục tiêu là học cơ chế và failure mode, không mô phỏng giả một cluster lớn trên
 cùng laptop. Vì vậy mỗi distributed system chỉ có số node tối thiểu.
+
+Quyết định thiết kế trung tâm là giữ đúng ranh giới ownership/state trước khi
+tăng số node: Airflow sở hữu orchestration, PostgreSQL/Kafka/Iceberg sở hữu dữ
+liệu bền, dbt/Spark sở hữu transformation và monitoring chỉ quan sát. Nhờ vậy
+retry không tạo thêm một “nguồn sự thật” trong scheduler hay dashboard.
 
 ## 2. Logical architecture
 
@@ -311,3 +321,5 @@ Off-host backup và restore drill vẫn là khoảng trống production.
 - CI: `.github/workflows/`
 - Operations: `docs/runbook.md`
 - File-by-file guide: `docs/code-map.md`
+- Current implemented baseline: `docs/current-state.md`
+- Unfinished production work: `docs/backlog.md`

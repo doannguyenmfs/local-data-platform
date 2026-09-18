@@ -1,7 +1,8 @@
 # LOCAL DATA PLATFORM — ROADMAP
 
 Trạng thái: P0 COMPLETE (schema contracts + CDC end-to-end complete)
-Xác minh end-to-end gần nhất: 2026-09-17
+Baseline code: 33d76fc (complete P0 CDC contracts and cutover)
+Rà soát trạng thái và tài liệu gần nhất: 2026-09-18
 
 | Level | Chủ đề | Kết quả |
 | --- | --- | --- |
@@ -21,11 +22,11 @@ Xác minh end-to-end gần nhất: 2026-09-17
 | 14 | CDC materialization | Bronze audit, Silver current/delete, reconcile và cutover |
 | 15 | Safe dbt delivery | enforced mart contracts, slim PR CI, full main proof |
 
-Tài liệu học tương nằm trong `docs/learning/01-*.md` đến `15-*.md`.
+Tài liệu học tương ứng nằm trong `docs/learning/01-*.md` đến `15-*.md`.
 Topology logical/physical nằm tại `docs/architecture.md`; trách nhiệm từng file
 nằm tại `docs/code-map.md`; thao tác vận hành nằm tại `docs/runbook.md`.
-Danh sách capability hiện có và advanced backlog chi tiết nằm tại
-`docs/platform-capabilities.md`.
+Nguồn sự thật về capability đang có nằm tại `docs/current-state.md`; danh sách
+việc chưa hoàn thành và Definition of Done nằm tại `docs/backlog.md`.
 
 ## Luồng hoàn chỉnh
 
@@ -82,6 +83,7 @@ theo chủ đích; mở rộng publication cần capacity/schema/ownership revie
 
 ## Hướng phát triển sau project
 
-Advanced roadmap được ưu tiên và mô tả Definition of Done tại
-`docs/platform-capabilities.md`. P0 đã hoàn tất; thứ tự gần nhất là external
-alerting/SLO, backup/DR và security, sau đó lineage/logging/HA.
+P0 đã hoàn tất. A6 trở đi **chưa được triển khai trong code hiện tại**; thứ tự
+gần nhất là external alerting/SLO, backup/DR và security, sau đó HA,
+lineage/catalog và centralized logs/traces. Toàn bộ nội dung, lý do, thiết kế dự
+kiến và Definition of Done được quản lý tại `docs/backlog.md`.

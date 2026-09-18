@@ -5,6 +5,18 @@ các ranh giới quan trọng của production: orchestration, incremental inges
 analytics engineering, distributed compute, lakehouse, streaming, data quality,
 CI và observability.
 
+## Trạng thái repository
+
+Code hiện tại là baseline **P0 đã hoàn thành** tại commit `33d76fc`: batch
+incremental cho bốn entity, customer CDC end-to-end, schema contract, dbt marts,
+Iceberg/Kafka và monitoring local. Đọc [Trạng thái hiện tại](docs/current-state.md)
+để biết chính xác chức năng nào đang tồn tại và bằng chứng nào dùng để xác minh.
+
+Các hạng mục production tiếp theo như external alerting/SLO, backup/PITR,
+security, HA, lineage và centralized telemetry **chưa nằm trong baseline này**.
+Chúng được mô tả cùng lý do, thiết kế dự kiến và Definition of Done tại
+[Backlog sau P0](docs/backlog.md).
+
 ## Kiến trúc
 
 ```text
@@ -30,8 +42,8 @@ Exporter ──► Prometheus ──► Grafana
 ```
 
 Topology chi tiết gồm 35 service definitions, 21 container chạy dài hạn, 4 init
-job, 10 one-shot tools, network/port/volume và lý do chọn số node được mô tả tại
-[Kiến trúc hệ thống](docs/architecture.md). Tra cứu trách nhiệm từng file tại
+job, 10 one-shot tools, 9 named volume, network/port và lý do chọn số node được
+mô tả tại [Kiến trúc hệ thống](docs/architecture.md). Tra cứu trách nhiệm từng file tại
 [Bản đồ code](docs/code-map.md). Để xem theo góc độ người dùng/operator thay vì
 theo component, đọc [Platform có thể làm gì?](docs/platform-capabilities.md).
 
@@ -172,27 +184,29 @@ thành production deployment. Luôn truyền `--target` rõ ràng trong automati
 
 Đọc theo thứ tự, hoặc bắt đầu từ [mục lục theo vai trò](docs/learning/README.md):
 
-1. [Nền tảng data platform local](docs/learning/01-platform-foundations.md)
-2. [Airflow orchestration](docs/learning/02-airflow-orchestration.md)
-3. [Data warehouse và SCD2](docs/learning/03-warehouse-modeling.md)
-4. [Incremental, idempotency và backfill](docs/learning/04-incremental-backfill.md)
-5. [dbt incremental](docs/learning/05-dbt-incremental.md)
-6. [Spark batch](docs/learning/06-spark.md)
-7. [Iceberg lakehouse](docs/learning/07-iceberg.md)
-8. [Kafka streaming](docs/learning/08-kafka.md)
-9. [Production integration](docs/learning/09-production-integration.md)
-10. [Monitoring và alerting](docs/learning/10-observability.md)
-11. [System verification và production trade-offs](docs/learning/11-verification-and-tradeoffs.md)
-12. [CDC với PostgreSQL và Debezium](docs/learning/12-cdc-debezium.md)
-13. [Schema Registry và Avro](docs/learning/13-schema-registry-avro.md)
-14. [CDC Bronze/Silver và cutover](docs/learning/14-cdc-bronze-silver-cutover.md)
-15. [dbt contracts và slim CI](docs/learning/15-dbt-contracts-slim-ci.md)
-16. [Bản đồ nhập môn từ dbt incremental đến CDC](docs/learning/00-beginner-map.md)
-17. [Kiến trúc logical và physical](docs/architecture.md)
-18. [Bản đồ code theo file](docs/code-map.md)
-19. [Runbook vận hành](docs/runbook.md)
-20. [Roadmap và phạm vi](ROADMAP.txt)
-21. [Functional capabilities và advanced roadmap](docs/platform-capabilities.md)
+1. [Trạng thái P0 thực tế](docs/current-state.md)
+2. [Nền tảng data platform local](docs/learning/01-platform-foundations.md)
+3. [Airflow orchestration](docs/learning/02-airflow-orchestration.md)
+4. [Data warehouse và SCD2](docs/learning/03-warehouse-modeling.md)
+5. [Incremental, idempotency và backfill](docs/learning/04-incremental-backfill.md)
+6. [dbt incremental](docs/learning/05-dbt-incremental.md)
+7. [Spark batch](docs/learning/06-spark.md)
+8. [Iceberg lakehouse](docs/learning/07-iceberg.md)
+9. [Kafka streaming](docs/learning/08-kafka.md)
+10. [Production integration](docs/learning/09-production-integration.md)
+11. [Monitoring và alerting](docs/learning/10-observability.md)
+12. [System verification và production trade-offs](docs/learning/11-verification-and-tradeoffs.md)
+13. [CDC với PostgreSQL và Debezium](docs/learning/12-cdc-debezium.md)
+14. [Schema Registry và Avro](docs/learning/13-schema-registry-avro.md)
+15. [CDC Bronze/Silver và cutover](docs/learning/14-cdc-bronze-silver-cutover.md)
+16. [dbt contracts và slim CI](docs/learning/15-dbt-contracts-slim-ci.md)
+17. [Bản đồ nhập môn từ dbt incremental đến CDC](docs/learning/00-beginner-map.md)
+18. [Kiến trúc logical và physical](docs/architecture.md)
+19. [Bản đồ code theo file](docs/code-map.md)
+20. [Runbook vận hành](docs/runbook.md)
+21. [Roadmap và phạm vi](ROADMAP.txt)
+22. [Functional capabilities](docs/platform-capabilities.md)
+23. [Backlog chưa hoàn thành](docs/backlog.md)
 
 ## Phạm vi production-shaped
 
@@ -205,3 +219,5 @@ nhất khoảng 8 GB Docker RAM. Không triển khai nguyên trạng này cho d�
 Checklist “đã có / local-only / còn thiếu” theo correctness, HA, security,
 observability, DR, delivery, scale và governance nằm trong
 [System verification và production trade-offs](docs/learning/11-verification-and-tradeoffs.md).
+Danh sách công việc chưa làm và tiêu chí hoàn thành nằm trong
+[Backlog sau P0](docs/backlog.md).

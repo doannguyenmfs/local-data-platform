@@ -4,6 +4,10 @@ Tài liệu này trả lời câu hỏi “tôi đang mở file gì?” trước
 Code comment giải thích local decision; các bài `docs/learning` giải thích khái
 niệm và trade-off rộng hơn.
 
+Phạm vi của bản đồ này là baseline P0. Trước khi đọc implementation, xem
+[`current-state.md`](current-state.md) để biết chức năng đã có; không tìm code
+cho các mục P1/P2 trong [`backlog.md`](backlog.md) vì chúng chưa được triển khai.
+
 Nếu các khái niệm từ dbt incremental trở đi còn mới, đọc
 [`docs/learning/00-beginner-map.md`](learning/00-beginner-map.md) trước. Bản đồ
 đó nối state/retry/delete xuyên suốt các tool; tài liệu này trả lời mỗi phần
@@ -30,7 +34,9 @@ implementation nằm ở đâu.
 | --- | --- | --- |
 | `README.md` | quickstart và scope | không thay runbook/architecture deep dive |
 | `ROADMAP.txt` | trạng thái level và accepted risks | không phải task scheduler |
-| `docs/platform-capabilities.md` | chức năng hiện có + advanced backlog | góc nhìn capability, không thay code map |
+| `docs/current-state.md` | nguồn sự thật về baseline P0 đang có | tách implemented khỏi planned |
+| `docs/platform-capabilities.md` | giải thích chức năng P0 theo góc nhìn người dùng | không thay code map |
+| `docs/backlog.md` | A6–A20 chưa làm + Definition of Done | không được đọc như code đã có |
 | `docker-compose.yml` | topology local executable | anchors tránh lặp Airflow/Spark config |
 | `.env.example` | contract cấu hình không bí mật | copy thành `.env`, không commit secret |
 | `requirements.txt` | dependency cho data generator/host tools | runtime container có requirements riêng |

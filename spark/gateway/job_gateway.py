@@ -3,6 +3,11 @@
 Spark standalone does not support Python applications in cluster deploy mode.
 The gateway keeps the Python driver in a long-running container while executors
 run on Spark workers. It also avoids mounting the Docker socket into Airflow.
+
+This is a laptop-scale adapter, not a general remote shell or a production job
+server. Callers select a reviewed capability name from ``JOBS``; they cannot
+submit an arbitrary path/command. The single lock intentionally serializes
+memory-heavy finite jobs on the one-worker P0 topology.
 """
 
 from __future__ import annotations

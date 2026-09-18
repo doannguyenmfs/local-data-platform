@@ -5,6 +5,11 @@ Topology, node/container, port và volume được giải thích trong
 [`docs/architecture.md`](architecture.md); trách nhiệm từng file nằm trong
 [`docs/code-map.md`](code-map.md).
 
+Runbook này chỉ vận hành baseline P0 mô tả trong
+[`current-state.md`](current-state.md). Các lệnh cho external alerting, backup,
+security, HA, lineage hay centralized telemetry chưa tồn tại; đó là công việc
+trong [`backlog.md`](backlog.md), không phải bước setup bị thiếu ở đây.
+
 ## 1. Chuẩn bị và khởi động
 
 ```bash

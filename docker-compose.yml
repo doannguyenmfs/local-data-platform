@@ -1,6 +1,13 @@
-# Local physical topology. The default profile starts core PostgreSQL/Airflow;
-# optional profiles add Spark, lakehouse, streaming and monitoring. `tools`
-# services are finite jobs created by `docker compose run`, not daemons.
+# P0 local physical topology: 35 service definitions = 21 long-running
+# processes + 4 init jobs + 10 one-shot tools, backed by 9 named volumes. These
+# counts document executable roles, not HA nodes: every durable subsystem still
+# has a single local failure domain.
+#
+# The default profile starts core PostgreSQL/Airflow; optional profiles add
+# Spark, lakehouse, streaming and monitoring. `tools` services are finite jobs
+# created by `docker compose run`, not daemons. P1 capabilities such as off-host
+# backup, TLS/RBAC, HA, lineage and centralized telemetry are intentionally not
+# hidden in this file; their design and Done criteria live in docs/backlog.md.
 
 # One anchor keeps all five Airflow daemons on the same image, connection
 # contract and bind mounts. Per-service sections below change only their role.

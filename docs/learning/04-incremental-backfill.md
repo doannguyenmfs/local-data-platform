@@ -112,7 +112,7 @@ demo và dùng explicit backfill khi phát hiện.
 
 Giả sử candidate là `10:00`:
 
-1. Extract customers/orders xong, Spark thất bại.
+1. Extract products/orders xong, Spark thất bại.
 2. Committed watermark vẫn là `09:00`; candidate giữ `10:00`.
 3. Retry đọc lại `(09:00, 10:00]` hoặc source max mới hơn.
 4. Staging upsert không nhân row; sinks merge/dedupe.
@@ -128,7 +128,8 @@ nhưng chưa commit hoàn chỉnh.
 - Không dùng `NOW()` làm upper bound nếu source writer có clock/transaction lệch;
   max source timestamp cho cửa sổ ổn định hơn trong phạm vi thiết kế này.
 - Một watermark/table cho phép các bảng tiến độc lập khi extract, nhưng barrier
-  cuối yêu cầu đủ năm candidate để tránh batch nửa vời.
+  cuối yêu cầu đủ bốn candidate batch để tránh batch nửa vời. Customer không có
+  candidate vì đã thuộc CDC Silver; đưa nó lại vào barrier sẽ tạo dual writer.
 - `max_active_runs=1` đơn giản hóa concurrency. Muốn song song cần batch id và
   state machine rõ hơn.
 

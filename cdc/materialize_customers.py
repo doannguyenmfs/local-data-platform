@@ -12,6 +12,12 @@ Beginner map
 
 This is at-least-once transport plus idempotent database application. It does
 not claim a distributed exactly-once transaction between Kafka and PostgreSQL.
+
+After P0 cutover this process is the only writer of CDC customer Silver state;
+Airflow no longer polls customers. Keeping that ownership singular prevents a
+late batch UPSERT from resurrecting a customer that CDC has already deleted.
+This service materializes data only: alert delivery, backup and automatic
+repair remain separate operational responsibilities.
 """
 
 from __future__ import annotations

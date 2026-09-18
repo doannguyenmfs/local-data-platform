@@ -19,6 +19,11 @@ unit test không phát hiện Docker DNS; end-to-end happy path không chứng m
 replay idempotent. Vì vậy release gate phải kết hợp chứ không chọn một loại test
 duy nhất.
 
+Các bằng chứng bên dưới thuộc baseline P0. Chúng không chứng minh external
+notification, restore/PITR, TLS/RBAC, HA, lineage hay centralized telemetry;
+những khoảng trống đó có tiêu chí hoàn thành riêng trong
+[`../backlog.md`](../backlog.md).
+
 ## Test pyramid áp dụng cho data platform
 
 | Lớp | Chi phí | Ví dụ | Lỗi bắt được |
@@ -46,7 +51,7 @@ chờ full-scale test.
 | Current state | 10 rows = 10 distinct `order_id` |
 | DLQ | 0 record trong happy path |
 | Iceberg maintenance | compact 11 data files và 10 position-delete files |
-| Airflow | manual DAG success; 5 candidate watermarks trở về `NULL` |
+| Airflow | manual DAG success; 4 candidate watermarks active trở về `NULL` |
 | Monitoring | 6 semantic component checks; 8 Prometheus rules; Alertmanager/Grafana health PASS |
 | CDC | connector/task RUNNING; bootstrap chạy lại an toàn; smoke test thấy `c,u,d,tombstone` |
 

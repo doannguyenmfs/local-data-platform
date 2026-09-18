@@ -12,6 +12,12 @@ Beginner mental model: extract tasks prepare candidate state; validation proves
 the batch is usable; dbt/Iceberg/Kafka may commit independently; only the final
 task promotes every candidate to the committed watermark.  A retry therefore
 moves forward with idempotent sinks instead of trying to roll back three systems.
+
+P0 ownership boundary: this DAG polls only products, orders, order_items and
+payments. Customers belong to the continuously running CDC Bronze/Silver path;
+adding a customer extract here would recreate a dangerous dual writer. The
+final barrier proves publication to the three required batch sinks, not that
+every asynchronous consumer has finished processing the resulting events.
 """
 
 from datetime import datetime, timedelta

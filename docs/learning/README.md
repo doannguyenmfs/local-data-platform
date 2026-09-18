@@ -15,6 +15,11 @@ Nếu bắt đầu mất dấu từ phần dbt incremental, hãy đọc
 bằng bốn câu hỏi về input, state, retry và ý nghĩa của success; đồng thời phân
 biệt rõ delete mới được **capture** hay đã được **apply**.
 
+Các bài Level 1–15 giải thích baseline P0 đã có trong repository. Đọc
+[Trạng thái P0](../current-state.md) trước nếu cần đối chiếu “đã làm”, và đọc
+[Backlog](../backlog.md) cho A6–A20 “chưa làm”. Việc một khái niệm xuất hiện
+trong backlog không có nghĩa container/config tương ứng đang tồn tại.
+
 ## Đường học đầy đủ
 
 | Level | Bài | Sau bài này cần trả lời được |

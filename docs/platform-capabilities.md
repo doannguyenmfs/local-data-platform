@@ -9,6 +9,11 @@ nghệ. Mục tiêu là trả lời:
 - giới hạn hiện tại là gì;
 - nên nâng cấp phần nào tiếp theo và theo thứ tự nào.
 
+**Phạm vi hiện tại:** các mục 1–14 là capability của baseline P0. Phần
+“Advanced roadmap” từ A6 trở đi là kế hoạch, không phải code đang chạy. Nguồn
+sự thật ngắn gọn cho trạng thái hiện tại là [`current-state.md`](current-state.md);
+backlog có Definition of Done chi tiết tại [`backlog.md`](backlog.md).
+
 Ký hiệu trạng thái:
 
 - **Hoàn thành**: đã có code, wiring và bằng chứng chạy.
@@ -332,9 +337,10 @@ shutdown và backup tối thiểu. Đây là nền tảng operability, chưa ph�
 
 ## 16. Advanced roadmap
 
-Roadmap dưới đây ưu tiên tính đúng và recoverability trước việc tăng số lượng
-công nghệ. `P0` là bước nối trực tiếp từ trạng thái hiện tại; `P1` đưa platform
-gần production; `P2` mở rộng scale/governance/product capability.
+Roadmap dưới đây là bản tóm tắt để giữ ngữ cảnh với capability P0. Từ A6 trở đi
+đều **chưa triển khai**; [`backlog.md`](backlog.md) mới là nơi quản lý chi tiết,
+thứ tự, thiết kế dự kiến và Definition of Done. Ưu tiên tính đúng và
+recoverability trước việc tăng số lượng công nghệ.
 
 | ID | Ưu tiên | Nâng cấp | Capability được mở khóa |
 | --- | --- | --- | --- |
@@ -349,12 +355,15 @@ gần production; `P2` mở rộng scale/governance/product capability.
 | A9 | P1 | High availability | chịu lỗi node/failure domain |
 | A10 | P1 | OpenLineage/catalog | biết dataset đến từ đâu, ai sở hữu và ảnh hưởng ai |
 | A11 | P1 | Centralized logs/traces | điều tra xuyên component bằng correlation |
+| A18 | P1 | Batch late row/hard delete | polling correctness có reconcile/proof |
 | A12 | P2 | Event-time/late streaming | xử lý window/out-of-order có state |
 | A13 | P2 | Data observability | phát hiện drift/anomaly ngoài rule tĩnh |
 | A14 | P2 | Capacity/cost engineering | sizing bằng workload và benchmark thật |
 | A15 | P2 | Semantic/serving layer | metric/API contract cho consumer |
 | A16 | P2 | Governance/privacy | PII, retention, deletion và access audit |
-| A17 | P2 | IaC/Kubernetes/cloud | promotion/deployment tái lập trên hạ tầng thật |
+| A19 | P2 | CDC + Registry theo domain | mở rộng capture/contract có capacity review |
+| A20 | P2 | Concurrency fencing/outbox | nhiều run/writer vẫn giữ đúng ordering |
+| A17 | P3 | IaC/Kubernetes/cloud | promotion/deployment tái lập trên hạ tầng thật |
 
 ### P0 — Hoàn thành data contract và CDC end-to-end
 
@@ -465,6 +474,13 @@ quy mô nhiều team vẫn là bước tổ chức ngoài local lab.
 - retention/search/redaction policy;
 - OpenTelemetry trace qua gateway/job boundaries khi có giá trị điều tra.
 
+#### A18. Batch late-arrival và hard-delete correctness
+
+- ingestion timestamp/lookback/reconciliation hoặc CDC theo source contract;
+- late/delete fixture và source-target control total;
+- index/query-plan proof để polling vẫn nằm trong SLA;
+- giữ explicit backfill như recovery tool, không coi nó là detector tự động.
+
 ### P2 — Streaming nâng cao, scale và data product
 
 #### A12. Event-time, late data và stateful streaming
@@ -505,6 +521,20 @@ quy mô nhiều team vẫn là bước tổ chức ngoài local lab.
 - access approval/audit;
 - data owner/steward và change-management policy.
 
+#### A19. Mở rộng CDC và Registry theo domain
+
+- review SLA/capacity/ownership trước khi thêm table vào publication;
+- versioned schema, compatibility, reconcile và single-writer cutover;
+- cân nhắc Registry/outbox cho order-event nếu trở thành public contract.
+
+#### A20. Concurrency fencing và transactional outbox
+
+- batch/run identity và compare-and-set/lease khi promote progress;
+- concurrent/reordered/crash test cho nhiều scheduler/writer;
+- dùng outbox hoặc source CDC khi cần atomicity với application mutation.
+
+### P3 — Hạ tầng production và environment promotion
+
 #### A17. IaC, environment promotion và Kubernetes/cloud
 
 - Terraform cho network, database, object store, Kafka và IAM;
@@ -538,6 +568,8 @@ trước khi biết data contract là gì, hoặc xây HA trước khi có backu
 ## 18. Tài liệu liên quan
 
 - [Bản đồ nhập môn](learning/00-beginner-map.md): state/retry/delete cho người mới.
+- [Trạng thái P0](current-state.md): capability thật đang tồn tại và bằng chứng.
+- [Backlog](backlog.md): công việc chưa hoàn thành và Definition of Done.
 - [Kiến trúc](architecture.md): topology, node, network, storage và failure domain.
 - [Production trade-offs](learning/11-verification-and-tradeoffs.md): readiness matrix.
 - [Runbook](runbook.md): command và recovery action.

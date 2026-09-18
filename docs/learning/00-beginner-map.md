@@ -9,6 +9,10 @@ nhớ option của từng tool. Hãy luôn trả lời bốn câu cho mỗi bư�
 3. **Nếu chạy lại thì sao?** Append thêm, merge vào key cũ hay no-op?
 4. **Success nghĩa là gì?** Process chạy, dữ liệu đã durable hay consumer đã apply?
 
+Sơ đồ dưới đây chỉ mô tả baseline P0 hiện hữu. Đối chiếu
+[`../current-state.md`](../current-state.md) khi cần kiểm tra trạng thái; những
+nâng cấp production chưa có được tách sang [`../backlog.md`](../backlog.md).
+
 ## 1. Bức tranh tổng thể bằng ngôn ngữ đơn giản
 
 ```text
