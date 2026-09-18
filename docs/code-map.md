@@ -1,5 +1,8 @@
 # Bản đồ code: file nào làm gì và đọc theo thứ tự nào
 
+> Điều hướng: [Trung tâm tài liệu](README.md) · [Trạng thái P0](current-state.md) ·
+> [Kiến trúc](architecture.md) · [Learning](learning/README.md)
+
 Tài liệu này trả lời câu hỏi “tôi đang mở file gì?” trước khi đi vào syntax.
 Code comment giải thích local decision; các bài `docs/learning` giải thích khái
 niệm và trade-off rộng hơn.
@@ -33,6 +36,7 @@ implementation nằm ở đâu.
 | File | Vai trò | Lưu ý |
 | --- | --- | --- |
 | `README.md` | quickstart và scope | không thay runbook/architecture deep dive |
+| `docs/README.md` | trung tâm điều hướng toàn bộ tài liệu | bắt đầu ở đây khi chưa biết đọc gì |
 | `ROADMAP.txt` | trạng thái level và accepted risks | không phải task scheduler |
 | `docs/current-state.md` | nguồn sự thật về baseline P0 đang có | tách implemented khỏi planned |
 | `docs/platform-capabilities.md` | giải thích chức năng P0 theo góc nhìn người dùng | không thay code map |

@@ -1,5 +1,8 @@
 # Project có thể làm gì? — Functional capabilities và hướng nâng cao
 
+> Điều hướng: [Trung tâm tài liệu](README.md) · [Trạng thái P0](current-state.md) ·
+> [Backlog authoritative](backlog.md)
+
 Tài liệu này mô tả platform từ góc nhìn chức năng, không bắt đầu bằng tên công
 nghệ. Mục tiêu là trả lời:
 

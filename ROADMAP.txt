@@ -27,6 +27,7 @@ Topology logical/physical nằm tại `docs/architecture.md`; trách nhiệm t�
 nằm tại `docs/code-map.md`; thao tác vận hành nằm tại `docs/runbook.md`.
 Nguồn sự thật về capability đang có nằm tại `docs/current-state.md`; danh sách
 việc chưa hoàn thành và Definition of Done nằm tại `docs/backlog.md`.
+Điểm bắt đầu và bản đồ “đọc gì ở đâu” nằm tại `docs/README.md`.
 
 ## Luồng hoàn chỉnh
 

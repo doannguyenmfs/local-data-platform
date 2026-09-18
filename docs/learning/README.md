@@ -1,5 +1,8 @@
 # Lộ trình đọc tài liệu học
 
+> Điều hướng: [Trung tâm tài liệu](../README.md) · [Trạng thái P0](../current-state.md) ·
+> [Kiến trúc](../architecture.md) · [Bản đồ code](../code-map.md)
+
 Thư mục này được viết để có thể học lại project mà không cần nhớ lịch sử hội
 thoại. Mỗi bài đi theo cùng một trình tự:
 

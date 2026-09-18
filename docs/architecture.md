@@ -1,5 +1,8 @@
 # Kiến trúc Local Data Platform — baseline P0
 
+> Điều hướng: [Trung tâm tài liệu](README.md) · [Trạng thái P0](current-state.md) ·
+> [Bản đồ code](code-map.md) · [Runbook](runbook.md)
+
 Tài liệu này mô tả kiến trúc **đang có trong code**, không mô tả kiến trúc P1
 dự kiến. Xem bản tóm tắt capability và bằng chứng tại
 [`current-state.md`](current-state.md); xem các thành phần chưa triển khai tại

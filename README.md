@@ -182,7 +182,8 @@ thành production deployment. Luôn truyền `--target` rõ ràng trong automati
 
 ## Tài liệu học và vận hành
 
-Đọc theo thứ tự, hoặc bắt đầu từ [mục lục theo vai trò](docs/learning/README.md):
+Bắt đầu tại [Trung tâm tài liệu](docs/README.md) để chọn đúng tài liệu theo mục
+tiêu. Nếu học tuần tự, dùng [mục lục learning](docs/learning/README.md):
 
 1. [Trạng thái P0 thực tế](docs/current-state.md)
 2. [Nền tảng data platform local](docs/learning/01-platform-foundations.md)

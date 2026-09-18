@@ -1,5 +1,8 @@
 # Runbook vận hành Local Data Platform
 
+> Điều hướng: [Trung tâm tài liệu](README.md) · [Kiến trúc](architecture.md) ·
+> [Trạng thái P0](current-state.md) · [Bản đồ code](code-map.md)
+
 Tài liệu này ưu tiên hành động. Phần “tại sao” nằm trong `docs/learning`.
 Topology, node/container, port và volume được giải thích trong
 [`docs/architecture.md`](architecture.md); trách nhiệm từng file nằm trong

@@ -1,5 +1,8 @@
 # Backlog sau P0
 
+> Điều hướng: [Trung tâm tài liệu](README.md) · [Trạng thái P0](current-state.md) ·
+> [Lab thực hành Senior](learning/17-senior-data-engineer-roadmap.md)
+
 Tài liệu này chỉ chứa capability **chưa hoàn thành** ở baseline P0. Mỗi mục mô
 tả nó là gì, tại sao cần, thiết kế dự kiến và điều kiện để được đổi trạng thái
 sang Done. Một thư mục/config thử nghiệm hoặc container chạy được chưa đủ để

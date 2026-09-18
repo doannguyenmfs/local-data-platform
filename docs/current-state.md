@@ -1,5 +1,8 @@
 # Trạng thái hiện tại — P0 hoàn thành
 
+> Điều hướng: [Trung tâm tài liệu](README.md) · [Kiến trúc](architecture.md) ·
+> [Runbook](runbook.md) · [Backlog](backlog.md)
+
 Tài liệu này là nguồn sự thật ngắn gọn về **những gì repository đang thực sự
 có ở commit P0**. Nó tách “đã triển khai” khỏi “muốn triển khai” để người đọc
 không nhầm một mục backlog với capability đang chạy.
