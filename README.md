@@ -207,6 +207,7 @@ thành production deployment. Luôn truyền `--target` rõ ràng trong automati
 21. [Roadmap và phạm vi](ROADMAP.txt)
 22. [Functional capabilities](docs/platform-capabilities.md)
 23. [Backlog chưa hoàn thành](docs/backlog.md)
+24. [Từ khóa tự học Airflow, Kafka và hệ sinh thái](docs/learning/16-self-study-keywords.md)
 
 ## Phạm vi production-shaped
 

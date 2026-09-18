@@ -15,6 +15,10 @@ Nếu bắt đầu mất dấu từ phần dbt incremental, hãy đọc
 bằng bốn câu hỏi về input, state, retry và ý nghĩa của success; đồng thời phân
 biệt rõ delete mới được **capture** hay đã được **apply**.
 
+Nếu cần từ khóa để tự tìm khóa học/video/tài liệu bên ngoài, dùng
+[Từ khóa tự học Data Engineering theo project](16-self-study-keywords.md). Tài
+liệu đó ưu tiên Airflow và Kafka, cung cấp cụm tìm kiếm tiếng Anh và thứ tự học.
+
 Các bài Level 1–15 giải thích baseline P0 đã có trong repository. Đọc
 [Trạng thái P0](../current-state.md) trước nếu cần đối chiếu “đã làm”, và đọc
 [Backlog](../backlog.md) cho A6–A20 “chưa làm”. Việc một khái niệm xuất hiện
@@ -39,6 +43,9 @@ trong backlog không có nghĩa container/config tương ứng đang tồn tại
 | 13 | [Schema Registry/Avro](13-schema-registry-avro.md) | schema ID, subject, reference và compatibility gate bảo vệ consumer ra sao? |
 | 14 | [CDC Bronze/Silver/cutover](14-cdc-bronze-silver-cutover.md) | capture thành current state/delete và đổi owner không dual-writer thế nào? |
 | 15 | [dbt contracts/slim CI](15-dbt-contracts-slim-ci.md) | contract khác test và manifest state/defer rút ngắn PR ra sao? |
+
+[Từ khóa tự học](16-self-study-keywords.md) là phụ lục tra cứu, không phải Level
+16 bắt buộc và không đại diện cho capability mới đã triển khai.
 
 `00-beginner-map.md` không phải một level mới. Nó là bản đồ để tra cứu trong lúc
 đọc Level 5–15.
