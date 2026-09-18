@@ -5,6 +5,10 @@ tả nó là gì, tại sao cần, thiết kế dự kiến và điều kiện �
 sang Done. Một thư mục/config thử nghiệm hoặc container chạy được chưa đủ để
 đánh dấu hoàn thành.
 
+Hướng dẫn biến các backlog item thành bài thực hành có requirement, failure
+scenario, evidence và runbook nằm tại
+[`learning/17-senior-data-engineer-roadmap.md`](learning/17-senior-data-engineer-roadmap.md).
+
 ## 1. Nguyên tắc ưu tiên
 
 ```text

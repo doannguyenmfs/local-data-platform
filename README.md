@@ -208,6 +208,7 @@ thành production deployment. Luôn truyền `--target` rõ ràng trong automati
 22. [Functional capabilities](docs/platform-capabilities.md)
 23. [Backlog chưa hoàn thành](docs/backlog.md)
 24. [Từ khóa tự học Airflow, Kafka và hệ sinh thái](docs/learning/16-self-study-keywords.md)
+25. [Lộ trình Senior DE và lab thực hành](docs/learning/17-senior-data-engineer-roadmap.md)
 
 ## Phạm vi production-shaped
 

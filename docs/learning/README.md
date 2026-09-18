@@ -19,6 +19,11 @@ Nếu cần từ khóa để tự tìm khóa học/video/tài liệu bên ngoài
 [Từ khóa tự học Data Engineering theo project](16-self-study-keywords.md). Tài
 liệu đó ưu tiên Airflow và Kafka, cung cấp cụm tìm kiếm tiếng Anh và thứ tự học.
 
+Nếu mục tiêu là tiến từ portfolio P0 lên năng lực Mid/Senior, đọc
+[Lộ trình Senior Data Engineer và các lab thực hành](17-senior-data-engineer-roadmap.md).
+Tài liệu này hướng dẫn tạo SLO/incident, restore drill, capacity benchmark,
+security proof, CDC recovery, schema migration, concurrency và cloud/IaC evidence.
+
 Các bài Level 1–15 giải thích baseline P0 đã có trong repository. Đọc
 [Trạng thái P0](../current-state.md) trước nếu cần đối chiếu “đã làm”, và đọc
 [Backlog](../backlog.md) cho A6–A20 “chưa làm”. Việc một khái niệm xuất hiện
@@ -46,6 +51,8 @@ trong backlog không có nghĩa container/config tương ứng đang tồn tại
 
 [Từ khóa tự học](16-self-study-keywords.md) là phụ lục tra cứu, không phải Level
 16 bắt buộc và không đại diện cho capability mới đã triển khai.
+[Lộ trình Senior](17-senior-data-engineer-roadmap.md) cũng là phụ lục thực hành;
+các lab trong đó vẫn là backlog cho tới khi có code và executable proof.
 
 `00-beginner-map.md` không phải một level mới. Nó là bản đồ để tra cứu trong lúc
 đọc Level 5–15.
